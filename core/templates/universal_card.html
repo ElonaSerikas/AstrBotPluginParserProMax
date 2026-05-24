@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ card_width }}, initial-scale=1.0">
+<style>
+/* ===== B站原版设计 DNA ===== */
+:root {
+    --pink: {{ platform_color }};
+    --pink-light: #ffe0e6;
+    --blue: #23ade5;
+    --text-main: #18191c;
+    --text-sub: #61666d;
+    --text-secondary: #9499a0;
+    --bg-body: #f1f2f3;
+    --bg-card: #ffffff;
+    --radius-lg: 24px;
+    --radius-md: 16px;
+    --radius-sm: 8px;
+    --shadow-card: 0 16px 40px rgba(251, 114, 153, 0.15), 0 4px 12px rgba(0,0,0,0.05);
+    --font-family: "Nunito", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: linear-gradient(135deg, #ffdee9 0%, #c8e3ff 100%);
+    padding: 15px;
+    display: flex;
+    justify-content: center;
+}
+
+/* ===== 卡片容器 ===== */
+.card {
+    width: {{ card_width }};
+    max-width: 100%;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    position: relative;
+}
+
+/* 顶部装饰条 - B站招牌设计 */
+.card::before {
+    content: '';
+    display: block;
+    height: 5px;
+    background: linear-gradient(90deg, var(--pink), #ffb1cc);
+}
+
+/* ===== Banner ===== */
+.banner-img {
+    width: 100%;
+    max-height: 180px;
+    object-fit: cover;
+    display: block;
+}
+
+/* ===== Header ===== */
+.header {
+    background: linear-gradient(180deg, #feedf6 0%, #ffdce8 100%);
+    padding: 20px 24px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.avatar-container {
+    position: relative;
+    width: 54px;
+    height: 54px;
+    flex-shrink: 0;
+}
+
+.up-avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 4px 8px rgba(251, 114, 153, 0.2);
+    object-fit: cover;
+}
+
+.up-pendant {
+    position: absolute;
+    top: -20%;
+    left: -20%;
+    width: 140%;
+    height: 140%;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.header-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.up-name {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--pink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.up-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.uid-tag {
+    font-size: 11px;
+    color: var(--pink);
+    background: rgba(251, 114, 153, 0.1);
+    border: 1px solid rgba(251, 114, 153, 0.3);
+    border-radius: 12px;
+    padding: 1px 8px;
+    white-space: nowrap;
+}
+
+.dynamic-badge {
+    font-size: 11px;
+    background: var(--pink-light);
+    color: var(--pink);
+    border-radius: 6px;
+    padding: 1px 8px;
+    white-space: nowrap;
+}
+
+.followers {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.qrcode-container {
+    background: #fff;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    flex-shrink: 0;
+}
+
+.qrcode-img {
+    width: 75px;
+    height: 75px;
+    object-fit: contain;
+    display: block;
+}
+
+/* ===== 签名 ===== */
+.signature {
+    padding: 4px 24px 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: linear-gradient(180deg, #feedf6 0%, #ffdce8 100%);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ===== 标题 ===== */
+.title {
+    padding: 4px 24px;
+    font-size: 14px;
+    color: #b85c76;
+    background: #fff0f5;
+    border-left: 4px solid var(--pink);
+    border-radius: 0 6px 6px 0;
+    width: fit-content;
+    margin: 0 24px 8px;
+    max-width: calc(100% - 48px);
+}
+
+/* ===== 内容区 ===== */
+.content {
+    padding: 0 24px 16px;
+    background: #fff;
+}
+
+.text-body {
+    font-size: 16px;
+    color: var(--text-main);
+    line-height: 1.65;
+    margin: 4px 0;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+
+.text-body img {
+    max-height: 22px;
+    vertical-align: text-bottom;
+}
+
+.text-body a {
+    color: var(--blue);
+    background: rgba(35, 173, 229, 0.08);
+    border-radius: 4px;
+    text-decoration: none;
+}
+
+/* ===== 统计信息 ===== */
+.stats-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 24px;
+    background: #fafafa;
+    border-top: 1px solid #f0f0f0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.stat-item {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.stat-item span {
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+/* ===== 图片区 ===== */
+.image-gallery {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+}
+
+.image-gallery .img-box {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    border: 1px solid rgba(0,0,0,0.03);
+}
+
+.image-gallery .img-box img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* ===== 置顶评论 ===== */
+.pinned-comment {
+    background: #fffbf0;
+    border: 1px solid #ffeeba;
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin: 8px 0;
+}
+
+.pinned-comment .pc-header {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.pinned-comment .pc-author {
+    color: var(--pink);
+    font-weight: 600;
+}
+
+.pinned-comment .pc-content {
+    font-size: 14px;
+    color: var(--text-main);
+    line-height: 1.5;
+}
+
+.pinned-comment .pc-likes {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* ===== 评论区 ===== */
+.comments-section {
+    border-top: 1px solid #f0f0f0;
+    padding: 12px 0;
+}
+
+.comments-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 8px;
+    padding: 0 24px;
+}
+
+.comment-item {
+    display: flex;
+    gap: 8px;
+    padding: 8px 24px;
+}
+
+.comment-item + .comment-item {
+    border-top: 1px solid #f5f5f5;
+}
+
+.comment-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #f0f0f0;
+}
+
+.comment-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.comment-author {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.comment-text {
+    font-size: 13px;
+    color: var(--text-main);
+    line-height: 1.5;
+    margin-top: 2px;
+}
+
+.comment-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* ===== 转发框 ===== */
+.forward-box {
+    background: #f7f8fa;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 8px 0;
+    border-left: 5px solid rgba(251, 114, 153, 0.4);
+}
+
+.forward-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.forward-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid #fff;
+}
+
+.forward-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #555;
+}
+
+.forward-text {
+    font-size: 15px;
+    color: #444;
+    line-height: 1.6;
+    word-break: break-word;
+}
+
+.forward-text img {
+    max-height: 22px;
+    vertical-align: text-bottom;
+}
+
+/* ===== 页脚 ===== */
+.footer {
+    background: linear-gradient(180deg, #f3f6f8 0%, #ebedf0 100%);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.source-badge {
+    font-family: "Nunito", sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    color: #008ac5;
+    background: #e6f7ff;
+    border-radius: 50px;
+    padding: 4px 16px;
+    box-shadow: 0 1px 3px rgba(0,138,197,0.15);
+}
+</style>
+</head>
+<body>
+<div class="card">
+    {% if banner %}
+    <img class="banner-img" src="{{ banner }}" alt="banner">
+    {% endif %}
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <div class="avatar-container">
+                {% if avatar %}
+                <img class="up-avatar" src="{{ avatar }}" alt="avatar"
+                     onerror="this.src='data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23f0f0f0%22/&gt;&lt;/svg&gt;'">
+                {% endif %}
+                {% if pendant %}
+                <img class="up-pendant" src="{{ pendant }}" alt="pendant">
+                {% endif %}
+            </div>
+            <div class="header-info">
+                <div class="up-name">{{ name }}</div>
+                <div class="up-meta">
+                    {% if uid %}
+                    <span class="uid-tag">UID {{ uid }}</span>
+                    {% endif %}
+                    {% if type %}
+                    <span class="dynamic-badge">{{ type }}</span>
+                    {% endif %}
+                    {% if follower_count %}
+                    <span class="followers">{{ follower_count }} 粉丝</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% if qrcode %}
+        <div class="qrcode-container">
+            <img class="qrcode-img" src="{{ qrcode }}" alt="QR">
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 签名 -->
+    {% if signature %}
+    <div class="signature">{{ signature }}</div>
+    {% endif %}
+
+    <!-- 标题 -->
+    {% if title %}
+    <div class="title">{{ title }}</div>
+    {% endif %}
+
+    <!-- 统计 -->
+    {% if stats %}
+    <div class="stats-bar">
+        {% if stats.views %}<span class="stat-item"><span>{{ stats.views }}</span> 播放</span>{% endif %}
+        {% if stats.danmaku %}<span class="stat-item"><span>{{ stats.danmaku }}</span> 弹幕</span>{% endif %}
+        {% if stats.likes %}<span class="stat-item"><span>{{ stats.likes }}</span> 赞</span>{% endif %}
+        {% if stats.favorites %}<span class="stat-item"><span>{{ stats.favorites }}</span> 收藏</span>{% endif %}
+        {% if stats.coins %}<span class="stat-item"><span>{{ stats.coins }}</span> 硬币</span>{% endif %}
+        {% if stats.comments %}<span class="stat-item"><span>{{ stats.comments }}</span> 评论</span>{% endif %}
+        {% if stats.reposts %}<span class="stat-item"><span>{{ stats.reposts }}</span> 转发</span>{% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 内容 -->
+    <div class="content">
+        {% if text %}
+        <div class="text-body">{{ text | safe }}</div>
+        {% endif %}
+
+        {% if summary and not text %}
+        <div class="text-body">{{ summary | safe }}</div>
+        {% endif %}
+
+        <!-- 图片 -->
+        {% if image_urls %}
+        <div class="image-gallery">
+            {% for img in image_urls %}
+            <div class="img-box"><img src="{{ img }}" alt="image"></div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- 置顶评论 -->
+        {% if pinned_comment %}
+        <div class="pinned-comment">
+            <div class="pc-header">
+                <span class="pc-author">{{ pinned_comment.author }}</span>
+                <span> · {{ pinned_comment.time }}</span>
+            </div>
+            <div class="pc-content">{{ pinned_comment.content }}</div>
+            <div class="pc-likes">👍 {{ pinned_comment.likes }}</div>
+        </div>
+        {% endif %}
+
+        <!-- 评论区 -->
+        {% if comments %}
+        <div class="comments-section">
+            <div class="comments-title">评论区</div>
+            {% for comment in comments %}
+            <div class="comment-item">
+                <div class="comment-avatar"></div>
+                <div class="comment-body">
+                    <div class="comment-author">{{ comment.author }}</div>
+                    <div class="comment-text">{{ comment.content }}</div>
+                    <div class="comment-meta">
+                        {% if comment.time %}{{ comment.time }} · {% endif %}
+                        👍 {{ comment.likes }}
+                        {% if comment.is_hot %}<span style="color:var(--pink)"> 🔥 热评</span>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- 转发 -->
+        {% if forward %}
+        <div class="forward-box">
+            <div class="forward-header">
+                {% if forward.avatar %}
+                <img class="forward-avatar" src="{{ forward.avatar }}" alt="">
+                {% endif %}
+                <span class="forward-name">@{{ forward.name }}</span>
+            </div>
+            {% if forward.title %}
+            <div style="font-size:16px;font-weight:600;color:var(--text-main);margin-bottom:4px">{{ forward.title }}</div>
+            {% endif %}
+            {% if forward.text %}
+            <div class="forward-text">{{ forward.text | safe }}</div>
+            {% endif %}
+            {% if forward.image_urls %}
+            <div class="image-gallery">
+                {% for img in forward.image_urls %}
+                <div class="img-box"><img src="{{ img }}" alt="image"></div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 页脚 -->
+    <div class="footer">
+        <span class="source-badge">AstrBot · Parser</span>
+    </div>
+</div>
+</body>
+</html>

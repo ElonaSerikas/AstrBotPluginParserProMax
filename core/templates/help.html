@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ card_width }}, initial-scale=1.0">
+<style>
+/* ===== B站原版设计 DNA ===== */
+:root {
+    --pink: {{ platform_color }};
+    --pink-light: #ffe0e6;
+    --blue: #23ade5;
+    --text-main: #18191c;
+    --text-sub: #61666d;
+    --text-secondary: #9499a0;
+    --bg-body: #f1f2f3;
+    --bg-card: #ffffff;
+    --radius-lg: 24px;
+    --radius-md: 16px;
+    --radius-sm: 8px;
+    --shadow-card: 0 16px 40px rgba(251, 114, 153, 0.15), 0 4px 12px rgba(0,0,0,0.05);
+    --font-family: "Nunito", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: linear-gradient(135deg, #ffdee9 0%, #c8e3ff 100%);
+    padding: 15px;
+    display: flex;
+    justify-content: center;
+}
+
+/* ===== 卡片容器 ===== */
+.card {
+    width: {{ card_width }};
+    max-width: 100%;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    position: relative;
+}
+
+/* 顶部装饰条 - B站招牌设计 */
+.card::before {
+    content: '';
+    display: block;
+    height: 5px;
+    background: linear-gradient(90deg, var(--pink), #ffb1cc);
+}
+
+/* ===== 页眉 ===== */
+.header {
+    background: linear-gradient(180deg, #feedf6 0%, #ffdce8 100%);
+    padding: 28px 24px 16px;
+    text-align: center;
+}
+
+.header-icon {
+    font-size: 36px;
+    margin-bottom: 4px;
+}
+
+.header h1 {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--pink);
+    letter-spacing: 0.5px;
+}
+
+.header .subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* ===== 内容区 ===== */
+.content {
+    padding: 16px 24px 20px;
+}
+
+.content h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--pink);
+    margin: 14px 0 6px;
+    padding-left: 10px;
+    border-left: 3px solid var(--pink);
+    line-height: 1.4;
+}
+
+.content h2:first-child {
+    margin-top: 0;
+}
+
+.content p {
+    font-size: 15px;
+    color: var(--text-main);
+    line-height: 1.6;
+    margin: 6px 0;
+    word-break: break-word;
+}
+
+/* ===== 帮助正文 ===== */
+.help-body {
+    font-size: 15px;
+    color: var(--text-main);
+    line-height: 1.7;
+}
+
+.help-body b,
+.help-body strong {
+    color: var(--pink);
+    font-weight: 700;
+}
+
+.help-body a {
+    color: var(--blue);
+    text-decoration: none;
+}
+
+/* ===== 命令区域 ===== */
+.commands-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 20px;
+    margin: 6px 0 10px;
+}
+
+.cmd-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.cmd-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    background: #f7f8fa;
+    border-radius: 4px;
+    padding: 0 6px;
+    white-space: nowrap;
+    font-family: "SF Mono", "Fira Code", monospace;
+}
+
+.cmd-desc {
+    font-size: 12px;
+    color: var(--text-sub);
+}
+
+/* ===== 平台列表 ===== */
+.platform-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px 16px;
+    margin: 6px 0;
+}
+
+.platform-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-main);
+}
+
+.platform-item .dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--pink);
+    flex-shrink: 0;
+}
+
+.platform-name {
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.platform-types {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* ===== 平台详情页 ===== */
+.platform-detail {
+    text-align: center;
+    padding: 8px 0;
+}
+
+.platform-detail .icon {
+    font-size: 40px;
+    margin-bottom: 4px;
+}
+
+.platform-detail .name {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--pink);
+}
+
+.platform-detail .info-row {
+    font-size: 14px;
+    color: var(--text-sub);
+    margin: 4px 0;
+}
+
+.platform-detail .info-row b {
+    color: var(--text-main);
+}
+
+.platform-detail .hint {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 10px;
+    background: #f7f8fa;
+    border-radius: 8px;
+    padding: 8px 16px;
+    display: inline-block;
+}
+
+/* ===== 分隔线 ===== */
+.section-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--pink-light), transparent);
+    margin: 4px 0;
+}
+
+/* ===== 页脚 ===== */
+.footer {
+    background: linear-gradient(180deg, #f3f6f8 0%, #ebedf0 100%);
+    padding: 14px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.footer .count-badge {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.footer .powered {
+    font-family: "Nunito", sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    color: #008ac5;
+    background: #e6f7ff;
+    border-radius: 50px;
+    padding: 4px 16px;
+    box-shadow: 0 1px 3px rgba(0,138,197,0.15);
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 640px) {
+    .commands-grid {
+        grid-template-columns: 1fr;
+    }
+    .platform-list {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+</style>
+</head>
+<body>
+<div class="card">
+    <!-- Header -->
+    <div class="header">
+        <div class="header-icon">&#x2728;</div>
+        <h1>{{ name }}</h1>
+        {% if title %}
+        <div class="subtitle">{{ title }}</div>
+        {% endif %}
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <div class="help-body">
+            {{ text | safe }}
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <span class="count-badge">Powered by AstrBot</span>
+        <span class="powered">Parser</span>
+    </div>
+</div>
+</body>
+</html>
