@@ -5,7 +5,8 @@ import re
 from typing import Any
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, Tag
+from bs4.element import NavigableString
 
 from ...data import MediaContent, SendGroup, TextContent, VideoContent
 from .common import BodyBlock, VideoEntry

@@ -100,11 +100,12 @@ class MusicSender:
         try:
             image = await self.renderer.draw_lyrics(
                 song.lyrics,
-                platform=player.platform.name if hasattr(player, 'platform') else "default",
+                platform=player.platform.display_name if hasattr(player, 'platform') else "",
                 song_name=song.name or "",
                 artist=song.artists or "",
                 cover_url=song.cover_url or "",
                 duration=song.duration or 0,
+                song_id=song.id or "",
             )
             await event.send(MessageChain(chain=[Image.fromBytes(image)]))
             return True
@@ -226,6 +227,7 @@ class MusicSender:
                 cover_url=song.cover_url,
                 platform=player.platform.display_name if hasattr(player, 'platform') else "",
                 comments=song.comments if self.cfg.enable_comments else None,
+                song_id=song.id or "",
             )
             from astrbot.api.message_components import Image as Img
             await event.send(event.chain_result([Img.fromBytes(image_bytes)]))

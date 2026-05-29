@@ -54,20 +54,26 @@ class EmojiLikeArbiter:
     协议特性：
     - 仲裁顺序一次性确定
     - 递补不重新仲裁，仅推进顺序指针
-    - 表情 124 作为“胜出权存在性证明”
+    - 表情 124 作为"胜出权存在性证明"
+    - 支持静态优先级（priority_map），优先级高的 Bot 始终胜出
     """
 
     # ================= 协议常量（严禁配置化） =================
 
     _EMOJI_ID = 289
     _EMOJI_TYPE = "1"
-    _WAIT_SEC = 1.0
+    _WAIT_SEC = 2.0
 
     _FEEDBACK_EMOJI_ID = 124
     _FEEDBACK_EMOJI_TYPE = "1"
     _FEEDBACK_WAIT_SEC = 0.7
 
     _TIME_SLICE = 60
+
+    # ================= 优先级配置 =================
+
+    def __init__(self):
+        self.priority_map: dict[int, int] = {}  # self_id → priority (数字越小优先级越高)
 
     # ================= 对外唯一入口 =================
 
@@ -186,11 +192,20 @@ class EmojiLikeArbiter:
         保证：
         - 顺序在所有 Bot 上完全一致
         - 不随时间推进而变化
+        - 若设置了 priority_map，按静态优先级排序（数字越小优先级越高）
         """
         participants = sorted(set(users))
         if not participants:
             return []
 
+        # 静态优先级模式：按 priority_map 排序
+        if self.priority_map:
+            def _priority_key(uid: int) -> tuple[int, int]:
+                prio = self.priority_map.get(uid, 999)
+                return (prio, uid)
+            return sorted(participants, key=_priority_key)
+
+        # 默认：基于时间的轮转
         base = (msg_time // self._TIME_SLICE) % len(participants)
         return [
             participants[(base + i) % len(participants)]

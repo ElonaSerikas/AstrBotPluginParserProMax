@@ -84,7 +84,7 @@ class ZhihuHandlerMixin:
             url=url,
             contents=contents,
             send_groups=send_groups,
-            extra={"info": self._build_article_card_meta(article, stats)},
+            extra={"uid": str(getattr(author, "uid", "") or ""), "post_id": str(article_id), "info": self._build_article_card_meta(article, stats)},
         )
 
     async def parse_answer(self, question_id: str, answer_id: str):
@@ -145,7 +145,7 @@ class ZhihuHandlerMixin:
             url=url,
             contents=contents,
             send_groups=send_groups,
-            extra={"info": self._build_answer_card_meta(answer_stats)},
+            extra={"uid": str(getattr(author, "uid", "") or ""), "post_id": str(answer_id), "info": self._build_answer_card_meta(answer_stats)},
         )
 
     async def parse_question(self, question_id: str):
@@ -222,7 +222,7 @@ class ZhihuHandlerMixin:
             url=url,
             contents=contents,
             send_groups=send_groups,
-            extra={"info": self._build_question_card_meta(question_stats)},
+            extra={"uid": str(getattr(author, "uid", "") or ""), "post_id": str(question_id), "info": self._build_question_card_meta(question_stats)},
         )
 
     async def parse_pin(self, pin_id: str):
@@ -265,5 +265,5 @@ class ZhihuHandlerMixin:
             url=url,
             contents=contents,
             send_groups=send_groups,
-            extra={"info": self._build_pin_card_meta(payload)},
+            extra={"uid": str(getattr(author, "uid", "") or ""), "post_id": str(pin_id), "info": self._build_pin_card_meta(payload)},
         )

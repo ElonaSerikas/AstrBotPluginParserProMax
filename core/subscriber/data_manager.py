@@ -113,7 +113,7 @@ class DataManager:
         """
         return self.get_all_subscriptions().get(sub_user)
 
-    def get_subscription(self, sub_user: str, uid: int) -> Optional[SubscriptionRecord]:
+    def get_subscription(self, sub_user: str, uid: str) -> Optional[SubscriptionRecord]:
         """
         获取特定用户对特定UP主的订阅信息。
         """
@@ -147,7 +147,7 @@ class DataManager:
     async def update_subscription(
         self,
         sub_user: str,
-        uid: int,
+        uid: str,
         filter_types: List[str],
         filter_regex: List[str],
         live_atall: bool,
@@ -196,7 +196,7 @@ class DataManager:
             del self.data["credential"]
             await self.save()
 
-    async def update_last_dynamic_id(self, sub_user: str, uid: int, dyn_id: str):
+    async def update_last_dynamic_id(self, sub_user: str, uid: str, dyn_id: str):
         """
         更新订阅的最新动态ID。
         """
@@ -205,7 +205,7 @@ class DataManager:
             sub.record_dynamic(dyn_id, self.recent_dynamic_cache)
             await self.save()
 
-    async def update_live_status(self, sub_user: str, uid: int, is_live: bool):
+    async def update_live_status(self, sub_user: str, uid: str, is_live: bool):
         """
         更新特定订阅的直播状态。
         """
@@ -214,7 +214,7 @@ class DataManager:
             sub.is_live = is_live
             await self.save()
 
-    async def remove_subscription(self, sub_user: str, uid: int) -> bool:
+    async def remove_subscription(self, sub_user: str, uid: str) -> bool:
         """
         移除一条订阅。
         """

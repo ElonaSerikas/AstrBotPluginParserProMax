@@ -36,6 +36,59 @@ class DouyinParser(BaseParser):
             self.ios_headers["Cookie"] = cookies_str
             self.android_headers["Cookie"] = cookies_str
 
+    async def _get_comments(self, aweme_id: str) -> tuple["Comment | None", "Comment | None"]:
+        """获取抖音置顶评论和热评（失败返回 (None, None)）"""
+        from ...data import Comment
+        try:
+            url = "https://www.douyin.com/aweme/v1/web/comment/list/"
+            params = {
+                "aweme_id": aweme_id,
+                "cursor": "0",
+                "count": "20",
+                "item_type": "0",
+            }
+            async with self.session.get(
+                url, params=params, headers=self.ios_headers, ssl=False
+            ) as resp:
+                if resp.status != 200:
+                    return None, None
+                data = await resp.json()
+
+            comments = data.get("comments", [])
+            if not comments:
+                return None, None
+
+            def _build_comment(c: dict) -> Comment | None:
+                user = c.get("user", {})
+                content = c.get("text", "")
+                if not content:
+                    return None
+                return Comment(
+                    author_name=user.get("nickname", ""),
+                    content=content,
+                    author_avatar=user.get("avatar_thumb", {}).get("url_list", [""])[0] if user.get("avatar_thumb") else "",
+                    likes=c.get("digg_count", 0),
+                    is_hot=True,
+                )
+
+            pinned_comment = None
+            hot_comment = None
+            # 第一条作为置顶，第二条作为热评
+            for c in comments[:2]:
+                built = _build_comment(c)
+                if not built:
+                    continue
+                if not pinned_comment:
+                    pinned_comment = built
+                elif not hot_comment:
+                    hot_comment = built
+                    break
+
+            return pinned_comment, hot_comment
+        except Exception as e:
+            logger.debug(f"[抖音] 获取评论失败(aweme_id={aweme_id}): {e}")
+            return None, None
+
     # https://v.douyin.com/_2ljF4AmKL8
     @handle("v.douyin", r"v\.douyin\.com/[a-zA-Z0-9_\-]+")
     @handle("jx.douyin", r"jx\.douyin\.com/[a-zA-Z0-9_\-]+")
@@ -45,13 +98,13 @@ class DouyinParser(BaseParser):
 
     # https://www.douyin.com/video/7521023890996514083
     # https://www.douyin.com/note/7469411074119322899
-    @handle("douyin", r"douyin\.com/(?P<ty>video|note)/(?P<vid>\d+)")
-    @handle("iesdouyin", r"iesdouyin\.com/share/(?P<ty>slides|video|note)/(?P<vid>\d+)")
-    @handle("m.douyin", r"m\.douyin\.com/share/(?P<ty>slides|video|note)/(?P<vid>\d+)")
+    @handle("douyin", r"douyin\.com/(?P<ty>video|note)/(?P<vid>\d+)\/?(?:\?.*)?$")
+    @handle("iesdouyin", r"iesdouyin\.com/share/(?P<ty>slides|video|note)/(?P<vid>\d+)\/?(?:\?.*)?$")
+    @handle("m.douyin", r"m\.douyin\.com/share/(?P<ty>slides|video|note)/(?P<vid>\d+)\/?(?:\?.*)?$")
     # https://jingxuan.douyin.com/m/video/7574300896016862490?app=yumme&utm_source=copy_link
     @handle(
         "jingxuan.douyin",
-        r"jingxuan\.douyin.com/m/(?P<ty>slides|video|note)/(?P<vid>\d+)",
+        r"jingxuan\.douyin\.com/m/(?P<ty>slides|video|note)/(?P<vid>\d+)\/?(?:\?.*)?$",
     )
     async def _parse_douyin(self, searched: re.Match[str]):
         ty, vid = searched.group("ty"), searched.group("vid")
@@ -68,7 +121,7 @@ class DouyinParser(BaseParser):
         for url in urls:
             try:
                 logger.debug(f"[抖音] 尝试解析: {url}")
-                return await self.parse_video(url)
+                return await self.parse_video(url, vid=vid, ty=ty)
             except ParseException as e:
                 logger.warning(f"[抖音] 解析失败 {url}, 错误: {e}")
                 continue
@@ -106,7 +159,7 @@ class DouyinParser(BaseParser):
         keyword, searched = self.search_url(redirect_url)
         return await self.parse(keyword, searched)
 
-    async def parse_video(self, url: str):
+    async def parse_video(self, url: str, vid: str = "", ty: str = ""):
         async with self.session.get(
             url, headers=self.ios_headers, allow_redirects=False, ssl=False
         ) as resp:
@@ -160,14 +213,48 @@ class DouyinParser(BaseParser):
 
         # 构建作者
         author = self.create_author(
-            video_data.author.nickname, video_data.avatar_url, headers=self.ios_headers
+            video_data.author.nickname,
+            video_data.avatar_url,
+            uid=video_data.author.uid or video_data.author.unique_id or None,
+            description=video_data.author.signature or None,
+            follower_count=video_data.author.follower_count or None,
         )
 
+        # 统计数据
+        stats = {}
+        if video_data.statistics:
+            stats = {
+                "views": video_data.statistics.play_count,
+                "likes": video_data.statistics.digg_count,
+                "comments": video_data.statistics.comment_count,
+                "reposts": video_data.statistics.share_count,
+                "favorites": video_data.statistics.collect_count,
+            }
+
+        # 额外信息
+        unique_id = video_data.author.unique_id or ""
+        extra = {
+            "uid": str(getattr(video_data.author, 'uid', '') or ''),
+            "video_id": vid if ty in ("video", "note") else "",
+            "handle": f"@{unique_id}" if unique_id else f"dy:{vid}",
+        }
+
+        # 获取评论
+        pinned_comment, hot_comment = await self._get_comments(vid)
+
+        extra["post_id"] = vid
         return self.result(
             title=video_data.desc,
+            text=video_data.desc,
             author=author,
             contents=contents,
             timestamp=video_data.create_time,
+            stats=stats,
+            url=f"https://www.douyin.com/{ty}/{vid}",
+            extra=extra,
+            page_type="video",
+            pinned_comment=pinned_comment,
+            hot_comment=hot_comment,
         )
 
     async def parse_slides(self, video_id: str):
@@ -215,12 +302,45 @@ class DouyinParser(BaseParser):
 
         # 构建作者
         author = self.create_author(
-            slides_data.name, slides_data.avatar_url, headers=self.android_headers
+            slides_data.name,
+            slides_data.avatar_url,
+            uid=slides_data.author.uid or slides_data.author.unique_id or None,
+            description=slides_data.author.signature or None,
+            follower_count=slides_data.author.follower_count or None,
         )
+
+        # 统计数据
+        stats = {}
+        if slides_data.statistics:
+            stats = {
+                "views": slides_data.statistics.play_count,
+                "likes": slides_data.statistics.digg_count,
+                "comments": slides_data.statistics.comment_count,
+                "reposts": slides_data.statistics.share_count,
+                "favorites": slides_data.statistics.collect_count,
+            }
+
+        # 额外信息
+        unique_id = slides_data.author.unique_id or ""
+        extra = {
+            "video_id": video_id,
+            "handle": f"@{unique_id}" if unique_id else f"dy:{video_id}",
+            "post_id": video_id,
+        }
+
+        # 获取评论
+        pinned_comment, hot_comment = await self._get_comments(video_id)
 
         return self.result(
             title=slides_data.desc,
+            text=slides_data.desc,
             author=author,
             contents=contents,
             timestamp=slides_data.create_time,
+            stats=stats,
+            url=f"https://www.douyin.com/video/{video_id}",
+            extra=extra,
+            page_type="video",
+            pinned_comment=pinned_comment,
+            hot_comment=hot_comment,
         )

@@ -112,13 +112,17 @@ class NGAParser(BaseParser):
 
         # 提取作者 - 先从 postauthor0 标签提取 uid，再从 JavaScript 中查找用户名
         author = None
+        author_uid = None
+        author_name = None
+        author_avatar = None
+        author_desc = None
         author_tag = soup.find(id="postauthor0")
         if author_tag and isinstance(author_tag, Tag):
             # 从 href 属性中提取 uid: href="nuke.php?func=ucp&uid=24278093"
             href = author_tag.get("href", "")
             uid_match = re.search(r"[?&]uid=(\d+)", str(href))
             if uid_match:
-                uid = uid_match.group(1)
+                author_uid = uid_match.group(1)
                 # 从 JavaScript 的 commonui.userInfo.setAll() 中查找对应用户名
                 script_pattern = r"commonui\.userInfo\.setAll\s*\(\s*(\{.*?\})\s*\)"
                 script_match = re.search(script_pattern, html, re.DOTALL)
@@ -126,13 +130,27 @@ class NGAParser(BaseParser):
                     try:
                         user_info_json = script_match.group(1)
                         user_info = json.loads(user_info_json)
-                        # 使用提取的 uid 查找用户名
-                        if uid in user_info:
-                            author = user_info[uid].get("username")
+                        if author_uid in user_info:
+                            uinfo = user_info[author_uid]
+                            author_name = uinfo.get("username")
+                            author_avatar = uinfo.get("avatar")
+                            author_desc = uinfo.get("signature", uinfo.get("bio"))
                     except (json.JSONDecodeError, KeyError):
-                        # JSON 解析失败或数据结构不符合预期,保持 author 为 None
                         pass
-        author = self.create_author(author) if author else None
+            # 回退：从 img 标签提取头像
+            if not author_avatar:
+                img_tag = author_tag.find("img")
+                if isinstance(img_tag, Tag):
+                    src = img_tag.get("src", "")
+                    if isinstance(src, str) and src.startswith("http"):
+                        author_avatar = src
+        if author_name:
+            author = self.create_author(
+                author_name,
+                author_avatar,
+                uid=author_uid,
+                description=author_desc,
+            )
         # 提取时间 - 从第一个帖子的 postdate0
         timestamp = None
         time_tag = soup.find(id="postdate0")
@@ -152,6 +170,16 @@ class NGAParser(BaseParser):
             contents.extend(self.create_image_contents(img_urls))
             text = self.clean_nga_text(text)
 
+        # 提取浏览/回复数
+        stats = {}
+        for stat_id, stat_key in (("post_replycount", "comments"), ("post_viewcount", "views")):
+            tag = soup.find(id=stat_id)
+            if tag and isinstance(tag, Tag):
+                try:
+                    stats[stat_key] = str(int(tag.get_text(strip=True)))
+                except (ValueError, TypeError):
+                    pass
+
         return self.result(
             title=title,
             text=text,
@@ -159,6 +187,8 @@ class NGAParser(BaseParser):
             author=author,
             contents=contents,
             timestamp=timestamp,
+            stats=stats or None,
+            extra={"uid": str(author_uid or ""), "post_id": url.split("/")[-1] if "/" in url else ""},
         )
 
     @staticmethod

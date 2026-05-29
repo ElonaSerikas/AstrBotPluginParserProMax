@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ card_width }}, initial-scale=1.0">
+<style>
+:root {
+    --pink: {{ platform_color }};
+    --pink-light: #ffe0e6;
+    --text-main: #18191c;
+    --text-sub: #61666d;
+    --text-secondary: #9499a0;
+    --bg-card: #ffffff;
+    --radius-lg: 24px;
+    --radius-sm: 8px;
+    --shadow-card: 0 16px 40px rgba(251, 114, 153, 0.15), 0 4px 12px rgba(0,0,0,0.05);
+    --font-family: "MisansTC", "Nunito", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-scale: {{ font_scale | default(1.0) }};
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: linear-gradient(135deg, #ffdee9 0%, #c8e3ff 100%);
+    padding: 15px;
+    display: flex;
+    justify-content: center;
+}
+
+.card {
+    width: {{ card_width }};
+    max-width: 100%;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    position: relative;
+    zoom: var(--font-scale);
+}
+
+.card::before {
+    content: '';
+    display: block;
+    height: 5px;
+    background: linear-gradient(90deg, var(--pink), #ffb1cc);
+}
+
+/* ===== 标题 ===== */
+.list-header {
+    padding: 20px 24px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.list-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--pink);
+}
+
+.list-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* ===== 歌曲列表 ===== */
+.song-list {
+    padding: 0 16px 16px;
+}
+
+.song-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    transition: background 0.15s;
+}
+
+.song-item:nth-child(even) {
+    background: rgba(251, 114, 153, 0.03);
+}
+
+.song-index {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: #f4f5f7;
+    flex-shrink: 0;
+}
+
+.song-item:nth-child(-n+3) .song-index {
+    color: #fff;
+    background: var(--pink);
+}
+
+.song-item:nth-child(1) .song-index { background: #ff4757; }
+.song-item:nth-child(2) .song-index { background: #ff6b81; }
+.song-item:nth-child(3) .song-index { background: #ff8fa3; }
+
+.song-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.song-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.song-artist {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.song-duration {
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+/* ===== 页脚 ===== */
+.footer {
+    background: linear-gradient(180deg, #f3f6f8 0%, #ebedf0 100%);
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.source-badge {
+    font-family: "Nunito", sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    color: var(--pink);
+    background: var(--pink-light);
+    border-radius: 50px;
+    padding: 3px 14px;
+}
+
+.qrcode-container {
+    background: #fff;
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+.qrcode-img {
+    width: 55px;
+    height: 55px;
+    object-fit: contain;
+    display: block;
+}
+</style>
+</head>
+<body>
+<div class="card">
+    <!-- 标题 -->
+    <div class="list-header">
+        <div>
+            <div class="list-title">{{ title }}</div>
+            <div class="list-subtitle">请选择歌曲序号</div>
+        </div>
+        {% if platform_display %}
+        <span style="font-size:12px; background:var(--pink-light); color:var(--pink); border-radius:6px; padding:2px 10px; font-weight:600;">{{ platform_display }}</span>
+        {% endif %}
+    </div>
+
+    <!-- 歌曲列表 -->
+    <div class="song-list">
+        {% for item in songs %}
+        <div class="song-item">
+            <div class="song-index">{{ loop.index }}</div>
+            <div class="song-info">
+                <div class="song-name">{{ item.name }}</div>
+                {% if item.artists %}
+                <div class="song-artist">{{ item.artists }}</div>
+                {% endif %}
+            </div>
+            {% if item.duration %}
+            <div class="song-duration">{{ item.duration }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 页脚 -->
+    <div class="footer">
+        <span class="source-badge">AstrBot · Music</span>
+        {% if qrcode %}
+        <div class="qrcode-container">
+            <img class="qrcode-img" src="{{ qrcode }}" alt="QR" onerror="this.parentElement.style.display='none'">
+        </div>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>

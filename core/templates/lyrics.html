@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ card_width }}, initial-scale=1.0">
+<style>
+:root {
+    --pink: {{ platform_color }};
+    --pink-light: #ffe0e6;
+    --text-main: #18191c;
+    --text-sub: #61666d;
+    --text-secondary: #9499a0;
+    --bg-card: #ffffff;
+    --radius-lg: 24px;
+    --radius-sm: 8px;
+    --shadow-card: 0 16px 40px rgba(251, 114, 153, 0.15), 0 4px 12px rgba(0,0,0,0.05);
+    --font-family: "MisansTC", "Nunito", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-scale: {{ font_scale | default(1.0) }};
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: linear-gradient(135deg, #ffdee9 0%, #c8e3ff 100%);
+    padding: 15px;
+    display: flex;
+    justify-content: center;
+}
+
+.card {
+    width: {{ card_width }};
+    max-width: 100%;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    position: relative;
+    zoom: var(--font-scale);
+}
+
+.card::before {
+    content: '';
+    display: block;
+    height: 5px;
+    background: linear-gradient(90deg, var(--pink), #ffb1cc);
+}
+
+/* ===== 歌曲信息 ===== */
+.lyrics-header {
+    background: linear-gradient(180deg, #feedf6 0%, #ffdce8 100%);
+    padding: 20px 24px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.lyrics-cover {
+    width: 80px;
+    height: 80px;
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    flex-shrink: 0;
+}
+
+.lyrics-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.lyrics-song-name {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--pink);
+    line-height: 1.3;
+}
+
+.lyrics-artist {
+    font-size: 14px;
+    color: var(--text-sub);
+    margin-top: 4px;
+}
+
+.lyrics-tags {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.lyrics-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.lyrics-tag.platform {
+    color: #fff;
+    background: var(--pink);
+}
+
+.lyrics-tag.duration {
+    color: var(--text-sub);
+    background: #f4f5f7;
+}
+
+/* ===== 歌词内容 ===== */
+.lyrics-body {
+    padding: 20px 24px;
+    font-size: 15px;
+    color: var(--text-main);
+    line-height: 2;
+    text-align: center;
+    word-break: break-word;
+}
+
+.lyrics-body .lrc-line {
+    padding: 2px 0;
+}
+
+.lyrics-body .lrc-line:empty {
+    height: 1em;
+}
+
+/* ===== 无歌词 ===== */
+.no-lyrics {
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+/* ===== 页脚 ===== */
+.footer {
+    background: linear-gradient(180deg, #f3f6f8 0%, #ebedf0 100%);
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.source-badge {
+    font-family: "Nunito", sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    color: var(--pink);
+    background: var(--pink-light);
+    border-radius: 50px;
+    padding: 3px 14px;
+}
+
+.qrcode-container {
+    background: #fff;
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+.qrcode-img {
+    width: 55px;
+    height: 55px;
+    object-fit: contain;
+    display: block;
+}
+</style>
+</head>
+<body>
+<div class="card">
+    <!-- 歌曲信息 -->
+    <div class="lyrics-header">
+        {% if image_urls %}
+        <img class="lyrics-cover" src="{{ image_urls[0] }}" alt="cover" onerror="this.style.display='none'">
+        {% endif %}
+        <div class="lyrics-meta">
+            <div class="lyrics-song-name">{{ title }}</div>
+            {% if name %}
+            <div class="lyrics-artist">{{ name }}</div>
+            {% endif %}
+            <div class="lyrics-tags">
+                {% if platform_display %}
+                <span class="lyrics-tag platform">{{ platform_display }}</span>
+                {% endif %}
+                {% if timestamp %}
+                <span class="lyrics-tag duration">{{ timestamp }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 歌词 -->
+    {% if text %}
+    <div class="lyrics-body">{{ text | safe }}</div>
+    {% else %}
+    <div class="no-lyrics">暂无歌词</div>
+    {% endif %}
+
+    <!-- 页脚 -->
+    <div class="footer">
+        <span class="source-badge">AstrBot · Music</span>
+        {% if qrcode %}
+        <div class="qrcode-container">
+            <img class="qrcode-img" src="{{ qrcode }}" alt="QR" onerror="this.parentElement.style.display='none'">
+        </div>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>

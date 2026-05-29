@@ -26,9 +26,12 @@ class ZhihuCardMixin:
             )
             or None
         )
+        # 提取用户ID（优先 urlToken，回退 id）
+        uid = str(author_data.get("urlToken") or author_data.get("id") or "") or None
         return self.create_author(
             name=name,
             avatar_url=avatar_url,
+            uid=uid,
             description=description,
             headers=headers,
         )

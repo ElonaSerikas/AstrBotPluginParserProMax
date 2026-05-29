@@ -7,7 +7,7 @@ from msgspec import Struct, field
 
 from ..config import PluginConfig
 from ..cookie import CookieJar
-from ..data import Platform
+from ..data import Comment, Platform
 from ..download import Downloader
 from .base import BaseParser, ParseException, handle
 
@@ -25,6 +25,66 @@ class KuaiShouParser(BaseParser):
         self.cookiejar = CookieJar(config, self.mycfg, domain="kuaishou.com")
         if self.cookiejar.cookies_str:
             self.ios_headers["cookie"] = self.cookiejar.cookies_str
+
+    async def _get_comments(self, photo_id: str) -> tuple[Comment | None, Comment | None]:
+        """获取置顶评论和热评（失败返回 (None, None)）"""
+        try:
+            url = "https://www.kuaishou.com/graphql"
+            payload = {
+                "operationName": "commentListQuery",
+                "variables": {
+                    "photoId": photo_id,
+                    "pcursor": "",
+                },
+                "query": "query commentListQuery($photoId: String, $pcursor: String) {"
+                         " shortVideoCommentList(photoId: $photoId, pcursor: $pcursor) {"
+                         "   commentList {"
+                         "     commentId"
+                         "     authorId"
+                         "     authorName"
+                         "     content"
+                         "     headUrl"
+                         "     likeCount"
+                         "   }"
+                         " }"
+                         "}",
+            }
+            async with self.session.post(url, json=payload, headers=self.ios_headers) as resp:
+                if resp.status != 200:
+                    return None, None
+                data = await resp.json()
+
+            comments = data.get("data", {}).get("shortVideoCommentList", {}).get("commentList", [])
+            if not comments:
+                return None, None
+
+            def _build_comment(c: dict) -> Comment | None:
+                content = c.get("content", "")
+                if not content:
+                    return None
+                return Comment(
+                    author_name=c.get("authorName", ""),
+                    content=content,
+                    author_avatar=c.get("headUrl", ""),
+                    likes=c.get("likeCount", 0),
+                    is_hot=True,
+                )
+
+            pinned_comment = None
+            hot_comment = None
+            for c in comments[:5]:
+                built = _build_comment(c)
+                if not built:
+                    continue
+                if not pinned_comment:
+                    pinned_comment = built
+                elif not hot_comment:
+                    hot_comment = built
+                    break
+
+            return pinned_comment, hot_comment
+        except Exception:
+            return None, None
 
     # https://v.kuaishou.com/2yAnzeZ
     @handle("v.kuaishou", r"v\.kuaishou\.com/[A-Za-z\d._?%&+\-=/#]+")
@@ -80,15 +140,53 @@ class KuaiShouParser(BaseParser):
             )
 
         # 构建作者
+        follower_count = None
+        if photo.fan_count:
+            follower_count = photo.fan_count if isinstance(photo.fan_count, int) else photo.fan_count.strip() or None
+
         author = self.create_author(
-            photo.name, photo.head_url, headers=self.ios_headers
+            photo.name,
+            photo.head_url,
+            uid=photo.user_id or None,
+            description=photo.user_text or None,
+            follower_count=follower_count,
         )
+
+        # 统计数据
+        stats = {}
+        if photo.view_count is not None:
+            stats["views"] = photo.view_count
+        if photo.like_count is not None:
+            stats["likes"] = photo.like_count
+        if photo.comment_count is not None:
+            stats["comments"] = photo.comment_count
+        if photo.favorite_count is not None:
+            stats["favorites"] = photo.favorite_count
+        if photo.share_count is not None:
+            stats["reposts"] = photo.share_count
+
+        # 额外信息
+        extra = {
+            "uid": str(photo.user_id or ""),
+            "handle": f"ks:{photo.user_id}" if photo.user_id else "",
+        }
+        if photo.photo_id:
+            extra["video_id"] = photo.photo_id
+
+        # 获取评论
+        pinned_comment, hot_comment = await self._get_comments(photo.photo_id) if photo.photo_id else (None, None)
 
         return self.result(
             title=photo.caption,
+            text=photo.caption,
+            url=url,
             author=author,
             contents=contents,
             timestamp=photo.timestamp // 1000,
+            stats=stats,
+            extra=extra,
+            pinned_comment=pinned_comment,
+            hot_comment=hot_comment,
         )
 
 
@@ -121,10 +219,20 @@ class Photo(Struct):
     timestamp: int
     duration: int = 0
     user_name: str = field(default="未知用户", name="userName")
+    user_id: str = field(default="", name="userId")
     head_url: str | None = field(default=None, name="headUrl")
+    user_text: str = field(default="", name="userText")
+    """用户签名/简介"""
     cover_urls: list[CdnUrl] = field(name="coverUrls", default_factory=list)
     main_mv_urls: list[CdnUrl] = field(name="mainMvUrls", default_factory=list)
     ext_params: ExtParams = field(name="ext_params", default_factory=ExtParams)
+    view_count: int | None = field(default=None, name="viewCount")
+    like_count: int | None = field(default=None, name="likeCount")
+    comment_count: int | None = field(default=None, name="commentCount")
+    favorite_count: int | None = field(default=None, name="favoriteCount")
+    share_count: int | None = field(default=None, name="shareCount")
+    photo_id: str = field(default="", name="photoId")
+    fan_count: str | int | None = field(default=None, name="fanCount")
 
     @property
     def name(self) -> str:

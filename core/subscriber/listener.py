@@ -277,37 +277,39 @@ class DynamicListener:
         render_fail: bool = False,
         nested: bool = False,
     ) -> list:
-        """转换为非图片模式下的消息链。"""
+        """转换为非图片模式下的消息链（控制总段数 ≤ 3）。"""
         chain = []
+
+        # 合并所有文本为单条消息
+        text_lines = []
         if render_fail and not nested:
-            chain.append(Plain("渲染图片失败了 (´;ω;`)\n"))
+            text_lines.append("渲染图片失败了 (´;ω;`)")
 
-        lines = list(
-            filter(
-                None,
-                [
-                    self._build_plain_header(payload, nested),
-                    (f"标题: {payload.title}" if payload.title else ""),
-                    self._build_plain_body(payload),
-                ],
-            )
-        )
-        if lines:
-            chain.append(Plain("\n".join(lines)))
+        text_lines.append(self._build_plain_header(payload, nested))
+        if payload.title:
+            text_lines.append(f"标题: {payload.title}")
+        text_lines.append(self._build_plain_body(payload))
 
-        for pic in filter(None, payload.image_urls):
-            chain.append(Image.fromURL(pic))
-
-        # 转发类型的转发部分会进入此分支
-        # [TODO] 此处"转发内容:"后的换行需要实现
         forward_data = getattr(payload, "forward", None)
         if forward_data:
-            chain.append(Plain("​\n转发内容:"))
-            chain.extend(self._compose_plain_push(forward_data, nested=True))
+            text_lines.append("转发内容:")
+            fwd_header = self._build_plain_header(forward_data, nested=True)
+            fwd_body = self._build_plain_body(forward_data)
+            text_lines.append(f"{fwd_header} {fwd_body}")
 
         url = payload.url
         if url and not nested:
-            chain.append(Plain(f"\n{url}"))
+            text_lines.append(url)
+
+        merged = "\n".join(filter(None, text_lines))
+        if merged.strip():
+            chain.append(Plain(merged))
+
+        # 图片最多保留 2 张（控制总段数）
+        pics = [pic for pic in payload.image_urls if pic][:2]
+        for pic in pics:
+            chain.append(Image.fromURL(pic))
+
         return chain
 
     def _compose_template_push(self, payload: Any, render_fail: bool = False) -> list:

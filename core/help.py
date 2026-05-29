@@ -10,7 +10,7 @@ from astrbot.api import logger
 # 全平台列表
 PLATFORM_HELP = {
     "bilibili": {
-        "name": "B站",
+        "name": "哔哩哔哩",
         "types": "视频/专栏/动态/直播/收藏夹",
         "features": "解析链接 / 订阅UP主 / 番剧推荐 / 热榜",
     },
@@ -63,28 +63,45 @@ class HelpSystem:
             "━" * 30,
             "",
             "【基础命令】",
-            "  /help           - 显示本帮助",
-            "  /help <平台>    - 查看特定平台详情",
-            "  /开启解析       - 开启当前会话解析",
-            "  /关闭解析       - 关闭当前会话解析",
+            "  /help, /帮助       - 显示本帮助",
+            "  /help <平台>       - 查看特定平台详情",
+            "  /开启解析          - 开启当前会话解析",
+            "  /关闭解析          - 关闭当前会话解析",
             "",
             "【B站命令】",
-            "  bili_sub <UID>  - 订阅UP主动态",
-            "  bili_sub_list   - 查看订阅列表",
-            "  bili_sub_del    - 删除订阅",
-            "  bili_card_style - 切换卡片样式",
-            "  bili_login      - B站扫码登录",
-            "  bili_logout     - B站登出",
-            "  bili_sub_test   - 测试订阅推送",
+            "  /bili_sub <UID>    - 订阅UP主动态",
+            "  /bili_sub_list     - 查看订阅列表",
+            "  /bili_sub_del <UID>- 删除订阅",
+            "  /bili_sub_test     - 测试订阅推送",
+            "  /bili_card_style   - 切换卡片样式",
+            "  /bili_login, /登录B站 - B站扫码登录",
+            "  /bili_logout       - B站登出",
+            "  /bili_global_sub   - 全局订阅",
+            "  /bili_global_list  - 全局订阅列表",
+            "  /bili_global_del   - 全局订阅删除",
+            "",
+            "【多平台订阅命令】",
+            "  /sub <平台> <UID>  - 订阅用户动态",
+            "  /sub_list          - 查看订阅列表",
+            "  /sub_del <平台> UID - 删除订阅",
+            "  支持: xhs, kujiequ, weibo, telegram, twitter, youtube",
+            "",
+            "【Cookie设置】",
+            "  /cookie_twitter <cookie>",
+            "  /cookie_weibo <cookie>",
+            "  /cookie_xhs <cookie>",
+            "  /cookie_youtube <cookie>",
+            "  /cookie_kujiequ <cookie>",
             "",
             "【点歌命令】",
-            "  点歌 <歌名>     - 搜索并播放歌曲",
-            "  查歌词 <歌名>   - 搜索歌词",
-            "  歌单收藏 <歌名> - 收藏歌曲",
-            "  歌单列表        - 查看歌单",
-            "  歌单点歌 <序号> - 从歌单播放",
-            "  全部点歌 <歌名> - 全平台搜索",
-            "  热歌榜          - 查看热门歌曲",
+            "  点歌 <歌名>       - 搜索并播放歌曲",
+            "  查歌词 <歌名>     - 搜索歌词",
+            "  歌单收藏 <歌名>   - 收藏歌曲",
+            "  歌单取藏 <歌名>   - 取消收藏",
+            "  歌单列表          - 查看歌单",
+            "  歌单点歌 <序号>   - 从歌单播放",
+            "  全部点歌 <歌名>   - 全平台搜索",
+            "  热歌榜            - 查看热门歌曲",
             "",
             "【解析功能】",
             "  直接发送链接即可自动解析",
@@ -131,10 +148,19 @@ class HelpSystem:
             )
             text = (
                 "万能解析器 v2.0<br><br>"
-                "<b>命令:</b><br>"
-                "/help, /开启解析, /关闭解析<br>"
-                "bili_sub, bili_sub_list, bili_sub_del<br>"
-                "点歌, 查歌词, 歌单列表, 歌单点歌<br><br>"
+                "<b>基础命令:</b><br>"
+                "/help, /开启解析, /关闭解析<br><br>"
+                "<b>B站命令:</b><br>"
+                "bili_sub, bili_sub_list, bili_sub_del, bili_sub_test<br>"
+                "bili_card_style, bili_login, bili_logout<br>"
+                "bili_global_sub, bili_global_list, bili_global_del<br><br>"
+                "<b>多平台订阅:</b><br>"
+                "sub, sub_list, sub_del<br><br>"
+                "<b>Cookie设置:</b><br>"
+                "cookie_twitter/weibo/xhs/youtube/kujiequ<br><br>"
+                "<b>点歌命令:</b><br>"
+                "点歌, 查歌词, 歌单收藏/取藏/列表/点歌<br>"
+                "全部点歌, 热歌榜<br><br>"
                 "<b>支持平台:</b>" + platforms_li
             )
             payload = RenderPayload(

@@ -45,6 +45,8 @@ class PageInfo:
 class VideoInfo(Struct):
     bvid: str
     """bvid"""
+    aid: int | None = None
+    """av号"""
     title: str
     """标题"""
     desc: str

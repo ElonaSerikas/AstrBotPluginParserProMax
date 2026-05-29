@@ -32,6 +32,7 @@ from ..render_html.constants import (  # noqa: E402
 DATA_PATH = "data/astrbot_plugin_parser.json"
 DEFAULT_CFG = {
     "bili_sub_list": {},  # sub_user -> [{"uid": "uid", "last": "last_dynamic_id", ...}]
+    "sub_list": {},       # 多平台订阅：sub_user -> [{"uid": "uid", "platform": "xxx", ...}]
     "credential": None,
     "last_success_sub_notify_ts": 0,
 }

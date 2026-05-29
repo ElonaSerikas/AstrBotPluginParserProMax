@@ -50,7 +50,9 @@ class VideoContent(MediaContent):
     """视频内容"""
 
     cover: Path | Task[Path] | None = None
-    """视频封面"""
+    """视频封面（下载后的本地路径或下载任务）"""
+    cover_url: str | None = None
+    """视频封面原始 URL（用于 HTML 渲染等需要直链的场景）"""
     duration: float = 0.0
     """时长 单位: 秒"""
 
@@ -79,7 +81,8 @@ class VideoContent(MediaContent):
 class ImageContent(MediaContent):
     """图片内容"""
 
-    pass
+    is_qr: bool = False
+    """是否为二维码图片（仅用于卡片渲染，不单独发送）"""
 
 
 @dataclass(repr=False, slots=True, init=False)
@@ -179,8 +182,8 @@ class Author:
     """作者个性签名等"""
     uid: str | None = None
     """平台 UID"""
-    follower_count: int | None = None
-    """粉丝数"""
+    follower_count: int | str | None = None
+    """粉丝数（精确整数或平台原字符串如"1.2万"）"""
 
     async def get_avatar_path(self) -> Path | None:
         if self.avatar is None:
@@ -242,6 +245,8 @@ class ParseResult:
     """统计数据 (views, likes, coins, favorites, comments, reposts, danmaku)"""
     pinned_comment: Comment | None = None
     """置顶评论"""
+    hot_comment: Comment | None = None
+    """热评（与置顶评论不同的热门评论）"""
     page_type: str = ""
     """页面类型: video/article/dynamic/user/favlist/topic/blog/etc"""
     _resource_id: str | None = field(init=False, repr=False)
@@ -275,7 +280,7 @@ class ParseResult:
 
     @property
     def img_contents(self) -> list[ImageContent]:
-        return [cont for cont in self.contents if isinstance(cont, ImageContent)]
+        return [cont for cont in self.contents if isinstance(cont, ImageContent) and not cont.is_qr]
 
     @property
     def audio_contents(self) -> list[AudioContent]:
@@ -406,3 +411,10 @@ class ParseResultKwargs(TypedDict, total=False):
     author: Author | None
     extra: dict[str, Any]
     repost: ParseResult | None
+    stats: dict[str, Any]
+    pinned_comment: Comment | None
+    hot_comment: Comment | None
+    comments: list[Comment]
+    page_type: str
+    music_info: MusicInfo | None
+    render_image: Path | None

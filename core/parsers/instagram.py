@@ -478,13 +478,31 @@ class InstagramParser(BaseParser):
             if isinstance(val, str) and val:
                 author_name = val
                 break
-        author = self.create_author(author_name) if author_name else None
+        author_uid = meta.get("uploader_id") or info.get("uploader_id") or ""
+        author_desc = meta.get("description") or info.get("description") or None
+        author = self.create_author(author_name, uid=str(author_uid) if author_uid else None, description=author_desc) if author_name else None
         title = meta.get("title") or info.get("title")
         timestamp = meta.get("timestamp") or info.get("timestamp")
+        text = meta.get("description") or info.get("description") or None
+
+        # 统计数据
+        stats = {}
+        if meta.get("view_count"):
+            stats["views"] = meta["view_count"]
+        if meta.get("like_count"):
+            stats["likes"] = meta["like_count"]
+        if meta.get("comment_count"):
+            stats["comments"] = meta["comment_count"]
+
+        post_id = meta.get("id") or info.get("id") or ""
 
         return self.result(
             title=title,
+            text=text,
             author=author,
             contents=contents,
             timestamp=timestamp,
+            url=url,
+            stats=stats or None,
+            extra={"uid": str(author_uid), "post_id": str(post_id), "handle": f"@{author_name}"} if author_name else {"uid": str(author_uid), "post_id": str(post_id)},
         )

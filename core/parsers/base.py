@@ -142,7 +142,40 @@ class BaseParser:
         Raises:
             ParseException: 解析失败时抛出
         """
-        return await self._handlers[keyword](self, searched)
+        result = await self._handlers[keyword](self, searched)
+        # 自动为解析结果生成二维码
+        if result.url:
+            await self._attach_qr_code(result)
+        return result
+
+    async def _attach_qr_code(self, result: ParseResult) -> None:
+        """为解析结果附加链接二维码"""
+        try:
+            from io import BytesIO
+
+            import qrcode
+
+            qr = qrcode.QRCode(version=1, box_size=8, border=2)
+            qr.add_data(result.url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+
+            # 保存到缓存目录
+            qr_path = self.cfg.cache_dir / f"qr_{abs(hash(result.url)) % (10**8)}.png"
+            import aiofiles
+
+            async with aiofiles.open(qr_path, "wb") as f:
+                await f.write(buf.getvalue())
+
+            result.contents.append(ImageContent(Path(qr_path), source_url=result.url, is_qr=True))
+        except Exception as e:
+            from astrbot.api import logger
+
+            logger.debug(f"生成二维码失败(url={result.url}): {e}")
 
     async def parse_with_redirect(
         self,
@@ -224,18 +257,20 @@ class BaseParser:
     def create_author(
         self,
         name: str,
-        avatar_url: str | None = None,
+        avatar: str | None = None,
+        *,
+        uid: str | None = None,
         description: str | None = None,
-        headers: dict[str, str] | None = None,
-    ):
+        follower_count: int | str | None = None,
+    ) -> Author:
         """创建作者对象"""
-
-        avatar_task = None
-        if avatar_url:
-            avatar_task = self.downloader.download_img(
-                avatar_url, headers=headers or self.headers, proxy=self.proxy
-            )
-        return Author(name=name, avatar=avatar_task, description=description)
+        return Author(
+            name=name,
+            avatar=avatar,
+            uid=uid,
+            description=description,
+            follower_count=follower_count,
+        )
 
     def create_video_content(
         self,
@@ -252,10 +287,11 @@ class BaseParser:
             )
         if isinstance(url_or_task, str):
             url_or_task = self.downloader.download_video(
-                url_or_task, headers=headers or self.headers, proxy=self.proxy
+                url_or_task, headers=headers or self.headers, proxy=self.proxy,
+                max_size_mb=self.cfg.max_video_size,
             )
 
-        return VideoContent(url_or_task, cover_task, duration)
+        return VideoContent(url_or_task, cover_task, duration, cover_url=cover_url)
 
     def create_video_content_by_task(
         self,
@@ -270,7 +306,7 @@ class BaseParser:
             cover_task = self.downloader.download_img(
                 cover_url, headers=headers or self.headers, proxy=self.proxy
             )
-        return VideoContent(path_task, cover_task, duration)
+        return VideoContent(path_task, cover_task, duration, cover_url=cover_url)
 
     def create_image_contents(
         self,
@@ -283,7 +319,7 @@ class BaseParser:
             task = self.downloader.download_img(
                 url, headers=headers or self.headers, proxy=self.proxy
             )
-            contents.append(ImageContent(task))
+            contents.append(ImageContent(task, source_url=url))
         return contents
 
     def create_dynamic_contents(
@@ -325,7 +361,7 @@ class BaseParser:
         image_task = self.downloader.download_img(
             image_url, headers=headers or self.headers, proxy=self.proxy
         )
-        return GraphicsContent(image_task, text, alt)
+        return GraphicsContent(image_task, source_url=image_url, text=text, alt=alt)
 
     def create_file_content(
         self,

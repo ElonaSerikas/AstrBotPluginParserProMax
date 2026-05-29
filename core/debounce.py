@@ -43,6 +43,11 @@ class Debouncer:
         """基于 link 的防抖"""
         return self._hit(session, f"link:{link}")
 
+    def clear_link(self, session: str, link: str) -> None:
+        """清除指定 link 的防抖记录（解析失败时调用，允许重试）"""
+        bucket = self._cache.get(session, {})
+        bucket.pop(f"link:{link}", None)
+
     def hit_resource(self, session: str, resource_id: str) -> bool:
         """基于资源 ID 的防抖"""
         return self._hit(session, f"res:{resource_id}")

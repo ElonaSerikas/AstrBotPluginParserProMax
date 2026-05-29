@@ -40,22 +40,26 @@ def auto_task(func: Callable[P, Coroutine[Any, Any, T]]) -> Callable[P, Task[T]]
 
 
 class VideoInfo(Struct):
-    title: str
+    title: str = ""
     """标题"""
-    channel: str
+    channel: str = ""
     """频道名称"""
-    uploader: str
+    uploader: str = ""
     """上传者 id"""
-    duration: int
+    duration: int = 0
     """时长"""
-    timestamp: int
+    timestamp: int = 0
     """发布时间戳"""
-    thumbnail: str
+    thumbnail: str = ""
     """封面图片"""
-    description: str
+    description: str = ""
     """简介"""
-    channel_id: str
+    channel_id: str = ""
     """频道 id"""
+    view_count: int | None = None
+    like_count: int | None = None
+    comment_count: int | None = None
+    repost_count: int | None = None
 
     @property
     def author_name(self) -> str:
@@ -90,6 +94,7 @@ class Downloader:
         file_name: str | None = None,
         headers: dict[str, str] | None = None,
         proxy: str | None | object = ...,
+        max_size_mb: int | None = None,
     ) -> Path:
         """流式下载"""
         async with self._download_semaphore:
@@ -101,6 +106,7 @@ class Downloader:
                 return file_path
             headers = headers or self.default_headers
             retries = self.cfg.download_retry_times
+            size_limit = max_size_mb or self.max_size
             for attempt in range(retries + 1):
                 try:
                     async with self.client.get(
@@ -109,14 +115,14 @@ class Downloader:
                         if response.status >= 400:
                             raise ClientError(f"HTTP {response.status} {response.reason}")
                         content_length = response.content_length
-                        max_bytes = self.max_size * 1024 * 1024
+                        max_bytes = size_limit * 1024 * 1024
 
                         if content_length == 0:
                             logger.warning(f"媒体 url: {url}, 大小为 0, 取消下载")
                             raise ZeroSizeException
                         if content_length and content_length > max_bytes:
                             logger.warning(
-                                f"媒体 url: {url} 大小 {content_length / 1024 / 1024:.2f} MB 超过 {self.max_size} MB, 取消下载"
+                                f"媒体 url: {url} 大小 {content_length / 1024 / 1024:.2f} MB 超过 {size_limit} MB, 取消下载"
                             )
                             raise SizeLimitException
 
@@ -182,11 +188,12 @@ class Downloader:
         video_name: str | None = None,
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
+        max_size_mb: int | None = None,
     ) -> Path:
         if video_name is None:
             video_name = generate_file_name(url, ".mp4")
         return await self.streamd(
-            url, file_name=video_name, headers=headers, proxy=proxy
+            url, file_name=video_name, headers=headers, proxy=proxy, max_size_mb=max_size_mb
         )
 
     @auto_task
@@ -258,12 +265,13 @@ class Downloader:
         output_path: Path,
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
+        max_size_mb: int | None = None,
     ) -> Path:
         """
         download video and audio file by url with stream and merge
         """
         v_path, a_path = await gather(
-            self.download_video(v_url, headers=headers, proxy=proxy),
+            self.download_video(v_url, headers=headers, proxy=proxy, max_size_mb=max_size_mb),
             self.download_audio(a_url, headers=headers, proxy=proxy),
         )
         await merge_av(v_path=v_path, a_path=a_path, output_path=output_path)
@@ -282,8 +290,9 @@ class Downloader:
             return info
         opts = {
             "quiet": True,
-            "skip_download": True,
+            "noplaylist": True,
             "http_headers": headers or self.default_headers,
+            "extractor_args": {"youtube": {"player_client": ["web", "android", "ios"]}},
         }
         if proxy:
             opts["proxy"] = proxy
@@ -312,6 +321,7 @@ class Downloader:
             "quiet": True,
             "skip_download": True,
             "http_headers": headers or self.default_headers,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
         if proxy:
             opts["proxy"] = proxy
@@ -395,6 +405,9 @@ class Downloader:
             "http_headers": headers or self.default_headers,
             "quiet": True,
             "no_warnings": True,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+            "retries": 10,
+            "fragment_retries": 10,
         }
         if not opts["format"]:
             opts.pop("format")

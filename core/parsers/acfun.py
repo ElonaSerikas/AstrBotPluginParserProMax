@@ -35,10 +35,14 @@ class AcfunParser(BaseParser):
         acid = int(searched.group("acid"))
         url = f"https://www.acfun.cn/v/ac{acid}"
 
-        m3u8_url, title, description, author, upload_time = await self.parse_video_info(
-            url
+        m3u8_url, title, description, author_name, author_uid, author_avatar, author_desc, upload_time, stats_data = (
+            await self.parse_video_info(url)
         )
-        author = self.create_author(author) if author else None
+        author = (
+            self.create_author(author_name, uid=author_uid, avatar=author_avatar, description=author_desc)
+            if author_name
+            else None
+        )
 
         # 2024-12-1 -> timestamp
         try:
@@ -50,22 +54,38 @@ class AcfunParser(BaseParser):
         # 下载视频
         video_task = asyncio.create_task(self.download_video(m3u8_url, acid))
 
+        # 统计数据
+        stats = {}
+        if stats_data.get("viewCount"):
+            stats["views"] = str(stats_data["viewCount"])
+        if stats_data.get("likeCount"):
+            stats["likes"] = str(stats_data["likeCount"])
+        if stats_data.get("commentCount"):
+            stats["comments"] = str(stats_data["commentCount"])
+        if stats_data.get("stowCount"):
+            stats["favorites"] = str(stats_data["stowCount"])
+
         return self.result(
             title=title,
             text=text,
+            url=url,
             author=author,
             timestamp=timestamp,
             contents=[self.create_video_content(video_task)],
+            stats=stats,
+            extra={"uid": str(author_uid or ""), "handle": f"ac{acid}", "post_id": str(acid)},
         )
 
-    async def parse_video_info(self, url: str) -> tuple[str, str, str, str, str]:
+    async def parse_video_info(
+        self, url: str
+    ) -> tuple[str, str, str, str, str | None, str | None, str | None, str, dict]:
         """解析acfun链接获取详细信息
 
         Args:
             url (str): 链接
 
         Returns:
-            tuple: (m3u8_url, title, description, author, upload_time)
+            tuple: (m3u8_url, title, description, author_name, author_uid, author_avatar, author_desc, upload_time, video_info_dict)
         """
 
         # 拼接查询参数
@@ -85,7 +105,11 @@ class AcfunParser(BaseParser):
 
         title = video_info.get("title", "")
         description = video_info.get("description", "")
-        author = video_info.get("user", {}).get("name", "")
+        user_data = video_info.get("user", {})
+        author_name = user_data.get("name", "")
+        author_uid = str(user_data.get("id")) if user_data.get("id") else None
+        author_avatar = user_data.get("head_url", user_data.get("avatar", ""))
+        author_desc = user_data.get("signature", user_data.get("description", ""))
         upload_time = video_info.get("createTime", "")
 
         ks_play_json = video_info["currentVideoInfo"]["ksPlayJson"]
@@ -94,7 +118,7 @@ class AcfunParser(BaseParser):
         # 这里[d['url'] for d in representations]，从 4k ~ 360，此处默认720p
         m3u8_url = [d["url"] for d in representations][3]
 
-        return m3u8_url, title, description, author, upload_time
+        return m3u8_url, title, description, author_name, author_uid, author_avatar, author_desc, upload_time, video_info
 
     async def download_video(self, m3u8s_url: str, acid: int) -> Path:
         """下载acfun视频
@@ -124,9 +148,9 @@ class AcfunParser(BaseParser):
                                 await f.write(chunk)
                                 total += len(chunk)
                                 bar.update(len(chunk))
-                                if total > self.cfg.max_size:  # 大小截断
+                                if total > self.cfg.max_video_size * 1024 * 1024:  # 大小截断
                                     break
-                        if total > self.cfg.max_size:
+                        if total > self.cfg.max_video_size * 1024 * 1024:
                             break
 
         except ClientError:

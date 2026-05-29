@@ -146,8 +146,8 @@ body {
         <div class="header-info">
             <div class="name">{{ name }}</div>
         </div>
-        {% if type %}
-        <span class="type-tag">{{ type }}</span>
+        {% if platform_display or type %}
+        <span class="type-tag">{{ platform_display or type }}</span>
         {% endif %}
     </div>
     <div class="content">

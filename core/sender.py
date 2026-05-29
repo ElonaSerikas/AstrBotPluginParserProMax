@@ -46,8 +46,8 @@ class MessageSender:
 
     重要原则：
     - 不在此处做解析
-    - 不在此处决定“内容是什么”
-    - 只负责“怎么发”
+    - 不在此处决定"内容是什么"
+    - 只负责"怎么发"
     """
 
     def __init__(self, config: PluginConfig, renderer: Renderer):
@@ -77,14 +77,17 @@ class MessageSender:
         """
         根据解析结果生成发送计划（plan）
 
-        plan 只做“策略决策”，不做任何 IO 或发送动作。
+        plan 只做"策略决策"，不做任何 IO 或发送动作。
         后续发送流程严格按 plan 执行，避免逻辑分散。
         """
         light, heavy = [], []
 
         # 合并主内容 + 转发内容，统一参与发送策略计算
+        # 过滤掉二维码图片（仅用于卡片渲染，不单独发送）
         iterable = contents if contents is not None else self._iter_contents(result)
         for cont in iterable:
+            if isinstance(cont, ImageContent) and cont.is_qr:
+                continue
             match cont:
                 case ImageContent() | GraphicsContent() | TextContent():
                     light.append(cont)
@@ -93,9 +96,9 @@ class MessageSender:
                 case _:
                     light.append(cont)
 
-        # 仅在“单一重媒体且无其他内容”时，才允许渲染卡片
-        is_single_heavy = len(heavy) == 1 and not light
-        render_card = is_single_heavy and self.cfg.single_heavy_render_card
+        # 有任意内容（图片/视频/文字等）时均允许渲染卡片
+        has_content = bool(light) or bool(heavy) or bool(result.text) or bool(result.title)
+        render_card = has_content and self.cfg.single_heavy_render_card
         if render_card_override is not None:
             render_card = render_card_override
         # 实际消息段数量（卡片也算一个段）
@@ -106,14 +109,54 @@ class MessageSender:
         if force_merge_override is not None:
             force_merge = force_merge_override
 
+        # Cards are always rendered with all content data.
+        # If there are 3+ images (light media), forward them separately.
+        # Text-only messages should never be forwarded.
+        if render_card:
+            force_merge = len(light) >= 3
+        elif contents is not None and all(
+            isinstance(c, TextContent) for c in contents
+        ):
+            force_merge = False
+
         return {
             "light": light,
             "heavy": heavy,
             "render_card": render_card,
-            # 预览卡片：仅在“渲染卡片 + 不合并”时独立发送
-            "preview_card": render_card and not force_merge,
+            # 卡片始终单独发送（不在合并转发中内联）
+            "preview_card": render_card,
             "force_merge": force_merge,
         }
+
+    # self_id → 显示名映射（从 angel_heart per_bot_configs 同步）
+    _BOT_NAME_MAP: dict[str, str] = {
+        "3958874605": "守岸人",
+        "3670290043": "薇尔莉特",
+        "3828485060": "八千代",
+    }
+
+    @staticmethod
+    def _resolve_bot_name(event: AstrMessageEvent) -> str:
+        """从 event.self_id 解析 Bot 显示名，未匹配返回空字符串"""
+        try:
+            self_id = str(event.get_self_id())
+            return MessageSender._BOT_NAME_MAP.get(self_id, "")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _build_header_prefix(result: ParseResult, bot_name: str = "") -> str:
+        """构建解析结果的前缀消息，格式: 「Bot名·平台解析」标题 — @作者"""
+        platform_name = result.platform.display_name if result.platform else "链接"
+        if bot_name:
+            parts = [f"「{bot_name}·{platform_name}解析」"]
+        else:
+            parts = [f"「{platform_name}解析」"]
+        if result.title:
+            parts.append(result.title)
+        if result.author and result.author.name:
+            parts.append(f"— @{result.author.name}")
+        return " ".join(parts) if len(parts) > 1 else parts[0]
 
     async def _send_preview_card(
         self,
@@ -122,18 +165,24 @@ class MessageSender:
         plan: dict,
     ):
         """
-        发送预览卡片（独立消息）
-
-        场景：
-        - 只有一个重媒体
-        - 未触发合并转发
-        - 卡片作为“预览”，不与正文混合
+        发送预览卡片（附带文字信息，减少消息段数避免 NapCat 超时）
         """
         if not plan["preview_card"]:
             return
 
         if image_path := await self.renderer.render_card(result):
-            await event.send(event.chain_result([Image(self._to_file_uri(image_path))]))
+            try:
+                # 将前缀与卡片图片合并为一条消息，减少发送次数
+                bot_name = self._resolve_bot_name(event)
+                prefix = self._build_header_prefix(result, bot_name=bot_name)
+                parts = [Plain(prefix), Image(self._to_file_uri(image_path))]
+                await event.send(event.chain_result(parts))
+            finally:
+                # 清理渲染产生的临时文件
+                try:
+                    image_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     async def _build_segments(
         self,
@@ -146,52 +195,47 @@ class MessageSender:
         这里负责：
         - 下载媒体
         - 转换为 AstrBot 消息组件
+        - 合并连续文本段，控制总段数 ≤ 3
         """
         segs: list[BaseMessageComponent] = []
-
-        # 合并转发时，卡片以内联形式作为一个消息段参与合并
-        if plan["render_card"] and plan["force_merge"]:
-            if image_path := await self.renderer.render_card(result):
-                segs.append(Image(self._to_file_uri(image_path)))
+        text_parts: list[str] = []  # 暂存文本，最后合并
 
         # 轻媒体处理
         for cont in plan["light"]:
             if isinstance(cont, TextContent):
                 if cont.text:
-                    segs.append(Plain(cont.text))
+                    text_parts.append(cont.text)
                 continue
 
             try:
                 path: Path = await cont.get_path()
-            except (DownloadLimitException, ZeroSizeException):
+            except DownloadLimitException:
                 continue
-            except DownloadException:
+            except (DownloadException, ZeroSizeException):
                 if self.cfg.show_download_fail_tip:
-                    segs.append(Plain("此项媒体下载失败"))
+                    text_parts.append("此项媒体下载失败")
                 continue
 
             match cont:
                 case ImageContent():
                     segs.append(Image(self._to_file_uri(path)))
                 case GraphicsContent() as g:
-                    # OneBot/aiocqhttp 本地文件参数要求 file:// URI，而非裸本地路径。
                     segs.append(Image(self._to_file_uri(path)))
-                    # GraphicsContent 允许携带补充文本
                     if g.text:
-                        segs.append(Plain(g.text))
+                        text_parts.append(g.text)
                     if g.alt:
-                        segs.append(Plain(g.alt))
+                        text_parts.append(g.alt)
 
         # 重媒体处理
         for cont in plan["heavy"]:
             try:
                 path: Path = await cont.get_path()
             except SizeLimitException:
-                segs.append(Plain("此项媒体超过大小限制"))
+                text_parts.append("此项媒体超过大小限制")
                 continue
             except DownloadException:
                 if self.cfg.show_download_fail_tip:
-                    segs.append(Plain("此项媒体下载失败"))
+                    text_parts.append("此项媒体下载失败")
                 continue
 
             match cont:
@@ -205,6 +249,12 @@ class MessageSender:
                     )
                 case FileContent():
                     segs.append(File(name=path.name, file=self._to_file_uri(path)))
+
+        # 将所有文本合并为单条 Plain（减少分段）
+        if text_parts:
+            merged_text = "\n".join(text_parts)
+            if merged_text.strip():
+                segs.insert(0, Plain(merged_text))
 
         return segs
 
@@ -232,8 +282,7 @@ class MessageSender:
 
         return [nodes]
 
-    @staticmethod
-    def _build_text_fallback(result: ParseResult) -> list[BaseMessageComponent]:
+    async def _build_text_fallback(self, result: ParseResult) -> list[BaseMessageComponent]:
         lines: list[str] = []
         if result.header:
             lines.append(result.header)
@@ -242,8 +291,43 @@ class MessageSender:
         elif result.extra.get("info"):
             lines.append(str(result.extra["info"]))
 
+        # 补充发布时间和来源链接
+        if result.timestamp:
+            from datetime import datetime, timezone, timedelta
+            try:
+                dt = datetime.fromtimestamp(result.timestamp, tz=timezone(timedelta(hours=8)))
+                lines.append(f"发布时间: {dt.strftime('%Y-%m-%d %H:%M')}")
+            except Exception:
+                pass
+        if result.url:
+            lines.append(f"来源: {result.url}")
+
+        segs: list[BaseMessageComponent] = []
         text = "\n".join(line for line in lines if line).strip()
-        return [Plain(text)] if text else []
+        if text:
+            segs.append(Plain(text))
+
+        # Also include cover/images when falling back to text mode
+        for cont in chain(
+            result.contents, result.repost.contents if result.repost else ()
+        ):
+            if isinstance(cont, ImageContent) and cont.is_qr:
+                continue
+            if isinstance(cont, ImageContent):
+                try:
+                    path = await cont.get_path()
+                    segs.append(Image(self._to_file_uri(path)))
+                except Exception:
+                    pass
+            elif isinstance(cont, VideoContent):
+                try:
+                    cover = await cont.get_cover_path()
+                    if cover:
+                        segs.append(Image(self._to_file_uri(cover)))
+                except Exception:
+                    pass
+
+        return segs
 
     def _resolve_groups(self, result: ParseResult) -> list[SendGroup]:
         if result.send_groups:
@@ -263,8 +347,11 @@ class MessageSender:
             render_card_override=group.render_card,
         )
 
-        await self._send_preview_card(event, result, plan)
+        # 先单独发送渲染卡片（如果有）
+        if plan["render_card"]:
+            await self._send_preview_card(event, result, plan)
 
+        # 构建消息段（合并转发时不再包含卡片，只包含原始媒体）
         segs = await self._build_segments(result, plan)
         segs = self._merge_segments_if_needed(event, segs, plan["force_merge"])
 
@@ -317,7 +404,7 @@ class MessageSender:
             sent = await self._send_group(event, result, group) or sent
 
         if not sent:
-            segs = self._build_text_fallback(result)
+            segs = await self._build_text_fallback(result)
             if not segs:
                 logger.warning("发送结果为空，不执行发送")
                 return

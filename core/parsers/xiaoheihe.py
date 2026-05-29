@@ -138,21 +138,21 @@ class XiaoheiheParser(BaseParser):
 
     @handle(
         "xiaoheihe.cn/app/bbs/link",
-        r"xiaoheihe\.cn/app/bbs/link/(?P<link_id>[0-9a-z]+)",
+        r"xiaoheihe\.cn/app/bbs/link/(?P<link_id>[0-9a-z]+)\/?(?:\?.*)?$",
     )
     async def _parse_bbs_web(self, searched: re.Match[str]):
         return await self._parse_bbs_by_link_id(searched.group("link_id"))
 
     @handle(
         "api.xiaoheihe.cn/v3/bbs/app/api/web/share",
-        r"api\.xiaoheihe\.cn/v3/bbs/app/api/web/share\?[A-Za-z0-9._%&+=/#@?;-]*link_id=(?P<link_id>[0-9a-z]+)",
+        r"api\.xiaoheihe\.cn/v3/bbs/app/api/web/share\?[A-Za-z0-9._%&+=/#@?;-]*link_id=(?P<link_id>[0-9a-z]+)(?:&.*)?$",
     )
     async def _parse_bbs_share(self, searched: re.Match[str]):
         return await self._parse_bbs_by_link_id(searched.group("link_id"))
 
     @handle(
         "api.xiaoheihe.cn/game/share_game_detail",
-        r"api\.xiaoheihe\.cn/game/share_game_detail\?[A-Za-z0-9._%&+=/#@?;-]*appid=(?P<appid>[0-9a-z]+)[A-Za-z0-9._%&+=/#@?;-]*game_type=(?P<game_type>[a-z]+)",
+        r"api\.xiaoheihe\.cn/game/share_game_detail\?[A-Za-z0-9._%&+=/#@?;-]*appid=(?P<appid>[0-9a-z]+)[A-Za-z0-9._%&+=/#@?;-]*game_type=(?P<game_type>[a-z]+)(?:&.*)?$",
     )
     async def _parse_game_share(self, searched: re.Match[str]):
         return await self._parse_game_by_appid(
@@ -161,7 +161,7 @@ class XiaoheiheParser(BaseParser):
 
     @handle(
         "xiaoheihe.cn/app/topic/game",
-        r"xiaoheihe\.cn/app/topic/game/(?P<game_type>[a-z]+)/(?P<appid>[0-9a-z]+)",
+        r"xiaoheihe\.cn/app/topic/game/(?P<game_type>[a-z]+)/(?P<appid>[0-9a-z]+)\/?(?:\?.*)?$",
     )
     async def _parse_game_web(self, searched: re.Match[str]):
         return await self._parse_game_by_appid(
@@ -176,6 +176,16 @@ class XiaoheiheParser(BaseParser):
         title = self._clean_text(str(link.get("title") or "")) or None
         final_url = f"https://www.xiaoheihe.cn/app/bbs/link/{link_id}"
         author = self._build_author(link)
+
+        # 提取发布时间
+        link_timestamp = None
+        for key in ("created_at", "createdAt", "timestamp", "date"):
+            raw = link.get(key)
+            if isinstance(raw, (int, float)):
+                link_timestamp = int(raw)
+                if link_timestamp > 10**12:
+                    link_timestamp //= 1000
+                break
 
         body_text, image_urls = self._parse_body_text_and_images(link)
         video_content = self._build_video_content(link)
@@ -208,12 +218,24 @@ class XiaoheiheParser(BaseParser):
         if video_content is not None:
             info_parts.append("正文视频 1 个")
 
+        # 统计数据
+        stats = {}
+        if link.get("views"):
+            stats["views"] = str(link["views"])
+        if link.get("likes"):
+            stats["likes"] = str(link["likes"])
+        if link.get("comments"):
+            stats["comments"] = str(link["comments"])
+        if link.get("favorites"):
+            stats["favorites"] = str(link["favorites"])
+
         return self.result(
             title=title,
             text=None if show_body_text else (body_text or None),
             url=final_url,
             author=author,
             contents=contents,
+            timestamp=link_timestamp,
             send_groups=send_groups,
             extra={
                 "info": "，".join(info_parts) if info_parts else None,
@@ -222,6 +244,7 @@ class XiaoheiheParser(BaseParser):
                 "has_video": bool(link.get("has_video")),
                 "video_url": link.get("video_url"),
             },
+            stats=stats,
         )
 
     async def _parse_game_by_appid(self, appid: str, game_type: str):
@@ -823,13 +846,15 @@ class XiaoheiheParser(BaseParser):
         if not name:
             return None
         avatar = str(user.get("avatar") or "") or None
+        uid = str(user.get("user_id") or user.get("id") or "") or None
         desc_parts: list[str] = []
         desc = self._clean_text(str(link.get("description") or ""))
         if desc:
             desc_parts.append(desc)
         return self.create_author(
             name=name,
-            avatar_url=avatar,
+            avatar=avatar,
+            uid=uid,
             description=" · ".join(desc_parts) if desc_parts else None,
         )
 

@@ -152,7 +152,7 @@ class PixivParser(BaseParser):
     # URL 处理器
     # ------------------------------------------------------------------
 
-    @handle("pixiv", r"pixiv\.net/artworks/(\d+)")
+    @handle("pixiv", r"pixiv\.net/artworks/(\d+)\/?(?:\?.*)?$")
     async def _parse_artwork(self, matched: Match[str]) -> ParseResult:
         """解析插画/漫画作品页 https://www.pixiv.net/artworks/{id}"""
         illust_id = matched.group(1)
@@ -181,7 +181,8 @@ class PixivParser(BaseParser):
         avatar_url: str | None = None
         if user and hasattr(user, "profile_image_urls"):
             avatar_url = self._get_img_url(user.profile_image_urls, "medium")
-        author = self.create_author(author_name, avatar_url)
+        author_desc = getattr(user, "comment", None) or None if user else None
+        author = self.create_author(author_name, avatar_url, description=author_desc)
         if user:
             author.uid = str(getattr(user, "id", ""))
 
@@ -237,9 +238,10 @@ class PixivParser(BaseParser):
             timestamp=timestamp,
             url=f"https://www.pixiv.net/artworks/{illust_id}",
             stats=stats,
+            extra={"uid": str(getattr(user, "id", "") or ""), "post_id": str(illust_id), "handle": f"@{author_name}"} if author_name else {"uid": str(getattr(user, "id", "") or ""), "post_id": str(illust_id)},
         )
 
-    @handle("pixiv.net/users", r"pixiv\.net/users/(\d+)")
+    @handle("pixiv.net/users", r"pixiv\.net/users/(\d+)\/?(?:\?.*)?$")
     async def _parse_user(self, matched: Match[str]) -> ParseResult:
         """解析用户主页 https://www.pixiv.net/users/{id}"""
         user_id = matched.group(1)

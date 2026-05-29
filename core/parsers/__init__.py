@@ -3,6 +3,7 @@ from .base import BaseParser
 from .bilibili import BilibiliParser
 from .cpp import CPPParser
 from .douyin import DouyinParser
+from .facebook import FacebookParser
 from .huajia import HuajiaParser
 from .instagram import InstagramParser
 from .kuaishou import KuaiShouParser
@@ -16,6 +17,7 @@ from .nga import NGAParser
 from .pixiv import PixivParser
 from .qqmusic import QQMusicParser
 from .tiktok import TikTokParser
+from .telegram import TelegramParser
 from .twitter import TwitterParser
 from .weibo import WeiBoParser
 from .xiaoheihe import XiaoheiheParser
@@ -29,6 +31,7 @@ __all__ = [
     "BilibiliParser",
     "CPPParser",
     "DouyinParser",
+    "FacebookParser",
     "HuajiaParser",
     "InstagramParser",
     "KuaiShouParser",
@@ -42,6 +45,7 @@ __all__ = [
     "PixivParser",
     "QQMusicParser",
     "TikTokParser",
+    "TelegramParser",
     "TwitterParser",
     "WeiBoParser",
     "XiaoheiheParser",

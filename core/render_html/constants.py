@@ -51,6 +51,24 @@ CARD_TEMPLATES: Dict[str, dict] = {
         "file": "template_simple.html",
         "path": str(BILIBILI_TEMPLATES_DIR / "template_simple.html"),
     },
+    "music_card": {
+        "name": "歌曲卡片",
+        "description": "单曲详情卡片（封面+热评+歌词预览）",
+        "file": "music_card.html",
+        "path": str(TEMPLATES_DIR / "music_card.html"),
+    },
+    "music_list": {
+        "name": "歌曲列表",
+        "description": "搜索结果/歌单列表卡片",
+        "file": "music_list.html",
+        "path": str(TEMPLATES_DIR / "music_list.html"),
+    },
+    "lyrics": {
+        "name": "歌词卡片",
+        "description": "歌词展示卡片（封面+歌词）",
+        "file": "lyrics.html",
+        "path": str(TEMPLATES_DIR / "lyrics.html"),
+    },
 }
 
 DEFAULT_TEMPLATE = "universal_card"
@@ -68,6 +86,7 @@ PLATFORM_COLORS = {
     "kuwo": "#ff6f00",
     "acfun": "#fd4c5d",
     "instagram": "#e4405f",
+    "telegram": "#0088cc",
     "tiktok": "#25f4ee",
     "ncm": "#c20c0c",
     "kuaishou": "#ff4800",

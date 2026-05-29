@@ -19,10 +19,7 @@ class ZhihuParser(
     ZhihuContentMixin,
     BaseParser,
 ):
-    platform: ClassVar[Platform] = Platform(
-        name="zhihu",
-        display_name="\u77e5\u4e4e",
-    )
+    platform: ClassVar[Platform] = Platform(name="zhihu", display_name="\u77e5\u4e4e")
     _CARD_SUMMARY_LIMIT: ClassVar[int] = 80
     _CARD_SENTENCE_MARKERS: ClassVar[tuple[str, ...]] = (
         "\u3002",

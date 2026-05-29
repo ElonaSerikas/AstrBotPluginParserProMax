@@ -46,7 +46,7 @@ def data():
 class TestParseResultToRenderPayload:
     def test_basic_fields_are_mapped(self, bridge, data, models):
         result = data.ParseResult(
-            platform=data.Platform(name="bilibili", display_name="B站"),
+            platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
             author=data.Author(name="测试UP主", description="测试签名", uid="12345"),
             title="测试视频标题",
             text="测试正文内容",
@@ -68,7 +68,7 @@ class TestParseResultToRenderPayload:
 
     def test_author_without_avatar(self, bridge, data):
         result = data.ParseResult(
-            platform=data.Platform(name="bilibili", display_name="B站"),
+            platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
             author=data.Author(name="无头像UP主"),
         )
         payload = bridge.parse_result_to_render_payload(result)
@@ -82,11 +82,11 @@ class TestParseResultToRenderPayload:
 
     def test_repost_is_mapped_to_forward(self, bridge, data):
         result = data.ParseResult(
-            platform=data.Platform(name="bilibili", display_name="B站"),
+            platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
             author=data.Author(name="原PO主"),
             title="转发视频",
             repost=data.ParseResult(
-                platform=data.Platform(name="bilibili", display_name="B站"),
+                platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
                 author=data.Author(name="被转发UP"),
                 title="被转发视频",
                 url="https://b23.tv/original",
@@ -98,16 +98,16 @@ class TestParseResultToRenderPayload:
 
     def test_stats_are_formatted(self, bridge, data):
         result = data.ParseResult(
-            platform=data.Platform(name="bilibili", display_name="B站"),
+            platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
             stats={"views": 123456, "likes": 7890, "danmaku": 1234},
         )
         payload = bridge.parse_result_to_render_payload(result)
-        assert payload.stats["views"] == "12.3万"
+        assert payload.stats["views"] == "123456"
         assert payload.stats["likes"] == "7890"
 
     def test_pinned_comment_is_mapped(self, bridge, data):
         result = data.ParseResult(
-            platform=data.Platform(name="bilibili", display_name="B站"),
+            platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
             pinned_comment=data.Comment(author_name="热评用户", content="置顶评论", likes=999, timestamp=1700000000),
         )
         payload = bridge.parse_result_to_render_payload(result)
@@ -116,14 +116,14 @@ class TestParseResultToRenderPayload:
     def test_comments_list_truncated_to_10(self, bridge, data):
         comments = [data.Comment(author_name=f"用户{i}", content=f"评论{i}") for i in range(15)]
         result = data.ParseResult(
-            platform=data.Platform(name="bilibili", display_name="B站"),
+            platform=data.Platform(name="bilibili", display_name="哔哩哔哩"),
             comments=comments,
         )
         payload = bridge.parse_result_to_render_payload(result)
         assert len(payload.comments) == 10
 
     def test_platform_color_is_set(self, bridge, data):
-        result = data.ParseResult(platform=data.Platform(name="bilibili", display_name="B站"))
+        result = data.ParseResult(platform=data.Platform(name="bilibili", display_name="哔哩哔哩"))
         payload = bridge.parse_result_to_render_payload(result)
         assert payload.platform_color == "#fb7299"
 

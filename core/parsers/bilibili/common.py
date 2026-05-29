@@ -8,3 +8,5 @@ class Upper(Struct):
     """作者"""
     face: str
     """头像"""
+    sign: str | None = None
+    """作者签名/简介"""

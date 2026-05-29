@@ -34,6 +34,7 @@ from .core.config import PluginConfig
 from .core.debounce import Debouncer
 from .core.download import Downloader
 from .core.parsers import BaseParser, BilibiliParser
+from .core.parsers.generic import GenericScreenshotParser, extract_first_url
 from .core.render import Renderer
 from .core.sender import MessageSender
 from .core.help import HelpSystem
@@ -45,6 +46,15 @@ from .core.subscriber.data_manager import DataManager
 from .core.subscriber.listener import DynamicListener
 from .core.subscriber.dispatcher import SubscriptionNotificationDispatcher
 from .core.subscriber.subscription_service import SubscriptionService
+
+# ---- Multi-platform subscriber modules ----
+from .core.subscriber.generic_listener import GenericDynamicListener
+from .core.subscriber.subscriber_xhs import XHSSubscriber
+from .core.subscriber.subscriber_kujiequ import KujiequSubscriber
+from .core.subscriber.subscriber_weibo import WeiboSubscriber
+from .core.subscriber.subscriber_telegram import TelegramSubscriber
+from .core.subscriber.subscriber_twitter import TwitterSubscriber
+from .core.subscriber.subscriber_youtube import YouTubeSubscriber
 
 # ---- B站 rendering data models & constants ----
 from .core.render_html.models import RenderPayload, SubscriptionRecord
@@ -94,14 +104,25 @@ class ParserPlugin(Star):
         # ===== Parser subsystems =====
         self.cfg = PluginConfig(config, context=context)
         self._raw_config = config  # direct AstrBotConfig for bilibili config ops
-        self.renderer = Renderer(self.cfg)
+        self.renderer = Renderer(self.cfg, star=self)
         self.downloader = Downloader(self.cfg)
         self.debouncer = Debouncer(self.cfg)
         self.arbiter = EmojiLikeArbiter()
+        # 链接解析优先级：八千代 > 守岸人 > 薇尔莉特
+        self.arbiter.priority_map = {
+            3828485060: 1,  # 八千代
+            3958874605: 2,  # 守岸人
+            3670290043: 3,  # 薇尔莉特
+        }
+        # 从配置读取已知Bot ID列表（用于多Bot共存过滤）
+        self._bot_self_ids = self._raw_config.get("platform_settings", {}).get(
+            "known_bot_ids", ["3958874605", "3670290043", "3828485060"]
+        )
         self.sender = MessageSender(self.cfg, self.renderer)
         self.cleaner = CacheCleaner(self.cfg)
         self.parser_map: dict[str, BaseParser] = {}
         self.key_pattern_list: list[tuple[str, re.Pattern[str]]] = []
+        self.generic_parser = GenericScreenshotParser(cache_dir=self.cfg.cache_dir)
         self.help_system = HelpSystem()
 
         # ===== B站 subsystems =====
@@ -175,6 +196,11 @@ class ParserPlugin(Star):
         self._bili_dynamic_listener_task: asyncio.Task | None = None
         self._start_bili_tasks()
 
+        # ===== Multi-platform subscriber subsystems =====
+        self._multi_subscribers: dict[str, object] = {}
+        self._generic_listener_task: asyncio.Task | None = None
+        self._init_multi_platform_subscribers()
+
         # ===== Music subsystems =====
         self.music_cfg = MusicPluginConfig(config, context)
         self.music_players: list[BaseMusicPlayer] = []
@@ -232,6 +258,20 @@ class ParserPlugin(Star):
                     f"Error cancelling B站 dynamic_listener task: {e}"
                 )
 
+        # ---- Multi-platform subscriber cleanup ----
+        if (
+            hasattr(self, "_generic_listener_task")
+            and self._generic_listener_task
+            and not self._generic_listener_task.done()
+        ):
+            self._generic_listener_task.cancel()
+            try:
+                await self._generic_listener_task
+            except asyncio.CancelledError:
+                logger.info("通用订阅监听器 task cancelled during terminate.")
+            except Exception as e:
+                logger.error(f"Error cancelling 通用订阅监听器 task: {e}")
+
         # ---- Music cleanup ----
         if self.music_downloader:
             await self.music_downloader.close()
@@ -276,6 +316,8 @@ class ParserPlugin(Star):
                 patterns.append((kw, re.compile(pat) if isinstance(pat, str) else pat))
 
         patterns.sort(key=lambda x: -len(x[0]))
+        # 通用 URL 匹配器（最低优先级，排在最后）
+        patterns.append(("", re.compile(r"https?://\S+")))
         self.key_pattern_list = patterns
 
         logger.debug(
@@ -303,6 +345,35 @@ class ParserPlugin(Star):
         self._bili_dynamic_listener_task = asyncio.create_task(
             self.bili_dynamic_listener.start()
         )
+
+    def _init_multi_platform_subscribers(self):
+        """初始化多平台订阅器和通用监听器。"""
+        proxy = self.proxy
+        xhs_cookies = getattr(self.cfg.parser.xhs, "cookies", "") if hasattr(self.cfg.parser, "xhs") else ""
+        weibo_cookies = getattr(self.cfg.parser.weibo, "cookies", "") if hasattr(self.cfg.parser, "weibo") else ""
+        telegram_proxy = proxy  # Telegram 需要代理
+
+        self._multi_subscribers = {
+            "xhs": XHSSubscriber(cookies=xhs_cookies),
+            "kujiequ": KujiequSubscriber(),
+            "weibo": WeiboSubscriber(cookies=weibo_cookies),
+            "telegram": TelegramSubscriber(proxy=telegram_proxy),
+            "twitter": TwitterSubscriber(),
+            "youtube": YouTubeSubscriber(),
+        }
+
+        self._generic_listener = GenericDynamicListener(
+            context=self.context,
+            data_manager=self.bili_data_manager,
+            renderer=self.bili_renderer,
+            dispatcher=self.bili_notification_dispatcher,
+            subscribers=self._multi_subscribers,
+            cfg=self._raw_config,
+        )
+        self._generic_listener_task = asyncio.create_task(
+            self._generic_listener.start()
+        )
+        logger.info(f"[多平台订阅] 已启动通用监听器，支持平台: {list(self._multi_subscribers.keys())}")
 
     def _compute_bili_reconnect_silent_duration(self) -> int:
         uid_count = len(self.bili_dynamic_listener._build_uid_targets())
@@ -411,7 +482,7 @@ class ParserPlugin(Star):
             img_path = await self.bili_renderer.render_dynamic(payload)
             if img_path:
                 await event.send(
-                    event.chain_result([Image.fromFile(img_path)])
+                    event.chain_result([Image.fromFileSystem(img_path)])
                     .message(payload.url)
                 )
                 return
@@ -485,7 +556,7 @@ class ParserPlugin(Star):
     # Event handlers (ALL)
     # =====================================================================
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=20)
     async def on_message(self, event: AstrMessageEvent):
         """消息的统一入口 — 解析各类平台链接"""
         umo = event.unified_msg_origin
@@ -494,6 +565,16 @@ class ParserPlugin(Star):
             return
         if self.cfg.blacklist and umo in self.cfg.blacklist:
             return
+
+        # 多Bot共存过滤：跳过来自其他已知Bot的消息
+        try:
+            sender_id = str(event.get_sender_id())
+            self_id = str(event.get_self_id())
+            if sender_id != self_id and sender_id in self._bot_self_ids:
+                logger.debug(f"[Parser] 消息来自另一Bot({sender_id})，跳过解析")
+                return
+        except Exception:
+            pass
 
         chain = event.get_messages()
         if not chain:
@@ -556,7 +637,21 @@ class ParserPlugin(Star):
         if isinstance(event, AiocqhttpMessageEvent) and event.is_private_chat():
             await event.send(event.plain_result("🔍 正在解析..."))
 
-        parse_res = await self.parser_map[keyword].parse(keyword, searched)
+        try:
+            if keyword:
+                parse_res = await self.parser_map[keyword].parse(keyword, searched)
+            else:
+                # 通用截图解析 fallback
+                url = searched.group(0)
+                logger.info(f"[解析] 无定制 parser，使用通用截图: {url}")
+                parse_res = await self.generic_parser.parse(url)
+                if not parse_res:
+                    logger.debug(f"[通用截图] 未获得结果，跳过: {url}")
+                    return
+        except Exception as e:
+            logger.error(f"[解析] {keyword or '通用截图'} 链接解析失败: {e}", exc_info=True)
+            self.debouncer.clear_link(umo, link)
+            return
 
         resource_id = parse_res.get_resource_id()
         if self.debouncer.hit_resource(umo, resource_id):
@@ -565,18 +660,74 @@ class ParserPlugin(Star):
             )
             return
 
-        await self.sender.send_parse_result(event, parse_res)
+        try:
+            await self.sender.send_parse_result(event, parse_res)
+        except Exception as e:
+            logger.error(f"[发送] 发送解析结果失败: {e}", exc_info=True)
+            return
+        event.stop_event()
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=20)
     async def on_search_song(self, event: AstrMessageEvent):
         """监听点歌命令"""
-        if not event.is_at_or_wake_command:
+        # 多Bot共存过滤：跳过来自其他已知Bot的消息
+        try:
+            sender_id = str(event.get_sender_id())
+            self_id = str(event.get_self_id())
+            if sender_id != self_id and sender_id in self._bot_self_ids:
+                return
+        except Exception:
+            pass
+
+        # 群聊中按优先级处理点歌：八千代 > 守岸人 > 薇尔莉特
+        # 动态检查群内实际存在的Bot，而非依赖静态列表
+        if not event.is_private_chat():
+            self_id_str = str(event.get_self_id())
+            music_priority = {"3828485060": 1, "3958874605": 2, "3670290043": 3}
+            my_prio = music_priority.get(self_id_str, 999)
+            if my_prio > 1:  # 非最高优先级才需要检查
+                try:
+                    group_id = event.get_group_id()
+                    if isinstance(event, AiocqhttpMessageEvent) and group_id:
+                        members = await event.bot.get_group_member_list(group_id=group_id)
+                        member_ids = {str(m.get("user_id", "")) for m in (members or [])}
+                        for other_id, other_prio in music_priority.items():
+                            if other_id == self_id_str:
+                                continue
+                            if other_prio < my_prio and other_id in member_ids:
+                                logger.debug(f"[Music] 群内存在更高优先级Bot({other_id})，当前Bot跳过点歌")
+                                return
+                except Exception as e:
+                    logger.debug(f"[Music] 获取群成员列表失败: {e}，回退到静态列表")
+                    for other_id, other_prio in music_priority.items():
+                        if other_id == self_id_str:
+                            continue
+                        if other_prio < my_prio and other_id in self._bot_self_ids:
+                            return
+
+        text = event.message_str.lstrip()
+        # 去掉 @mention 前缀（如 "@守岸人 点歌 枫茶" → "点歌 枫茶"）
+        parts = text.split(None, 2)
+        if len(parts) >= 2 and parts[0].startswith("@"):
+            text = " ".join(parts[1:])
+        cmd, _, arg = text.partition(" ")
+        # 去掉 / 前缀（如 "/点歌" → "点歌"）
+        cmd_clean = cmd.lstrip("/")
+
+        # 判断是否为音乐命令
+        is_music_cmd = cmd_clean == "点歌" or any(
+            kw in cmd_clean for kw in self.music_keywords
+        )
+        if not is_music_cmd:
             return
-        cmd, _, arg = event.message_str.partition(" ")
+
+        # 未指定歌名时提示用法
         if not arg:
+            yield event.plain_result("请输入歌名，例如：点歌 晴天")
             return
+
         player = self.get_music_player(word=cmd)
-        if "点歌" == cmd:
+        if cmd_clean == "点歌":
             player = self.get_music_player(default=True)
         if not player:
             return
@@ -628,9 +779,9 @@ class ParserPlugin(Star):
                 controller: SessionController, event: AstrMessageEvent
             ):
                 arg = event.message_str.strip()
-                arg_lower = arg.lower()
+                arg_lower = arg.lower().lstrip("/")
                 for kw in self.music_keywords:
-                    if kw in arg_lower:
+                    if kw in arg_lower or ("点歌" in arg_lower):
                         parts = arg.split()
                         idx = (
                             int(parts[-1])
@@ -673,11 +824,27 @@ class ParserPlugin(Star):
 
         event.stop_event()
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=20)
     async def parse_miniapp(self, event: AstrMessageEvent):
-        """解析QQ小程序JSON中的B站链接"""
+        """解析所有平台的QQ小程序JSON卡片，提取链接并发送基本信息
+
+        支持平台: 哔哩哔哩, 小红书, 抖音, 微博, 音乐分享等。
+        on_message 会优先通过 extract_json_url 提取 URL 并进行深度解析;
+        此处理器作为补充, 将卡片元信息(标题+链接)直接呈现给用户。
+        """
         if not self.enable_parse_miniapp:
             return
+
+        # 多Bot共存过滤：跳过来自其他已知Bot的消息
+        try:
+            sender_id = str(event.get_sender_id())
+            self_id = str(event.get_self_id())
+            if sender_id != self_id and sender_id in self._bot_self_ids:
+                logger.debug(f"[Parser/MiniApp] 消息来自另一Bot({sender_id})，跳过解析")
+                return
+        except Exception:
+            pass
+
         for msg_element in event.message_obj.message:
             if (
                 hasattr(msg_element, "type")
@@ -691,39 +858,64 @@ class ParserPlugin(Star):
                         parsed_data = json_string
                     else:
                         parsed_data = json.loads(json_string)
+
+                    # 使用通用 extract_json_url 提取链接 (支持所有平台)
+                    url = extract_json_url(parsed_data)
+                    if not url:
+                        continue
+
+                    # 转换 b23.tv 短链为 BV 号
+                    if "https://b23.tv" in url:
+                        try:
+                            url = await self.bili_client.b23_to_bv(url)
+                        except Exception:
+                            pass
+
+                    # 群聊仲裁：确保只有一个 Bot 处理同一张卡片
+                    if isinstance(event, AiocqhttpMessageEvent) and not event.is_private_chat():
+                        raw = event.message_obj.raw_message
+                        if isinstance(raw, dict):
+                            is_win = await self.arbiter.compete(
+                                bot=event.bot,
+                                ctx=ArbiterContext(
+                                    message_id=int(raw["message_id"]),
+                                    msg_time=int(raw["time"]),
+                                    self_id=int(raw["self_id"]),
+                                ),
+                            )
+                            if not is_win:
+                                logger.debug("[Parser/MiniApp] Bot在仲裁中输了, 跳过解析")
+                                return
+
+                    # 从元数据中提取标题/描述
                     meta = parsed_data.get("meta", {})
-                    detail_1 = meta.get("detail_1", {})
-                    title = detail_1.get("title")
-                    qqdocurl = detail_1.get("qqdocurl")
-                    desc = detail_1.get("desc")
+                    title = ""
+                    for section in meta.values():
+                        if isinstance(section, dict):
+                            # detail_1: desc 是内容标题
+                            if section.get("desc"):
+                                title = section.get("desc", "")
+                                break
+                            # news: title 是内容标题
+                            if section.get("title"):
+                                title = section.get("title", "")
 
-                    if title == "哔哩哔哩" and qqdocurl:
-                        if "https://b23.tv" in qqdocurl:
-                            qqdocurl = await self.bili_client.b23_to_bv(
-                                qqdocurl
-                            )
-                        ret = f"标题: {desc}\n链接: {qqdocurl}"
-                        await event.send(event.plain_result(ret))
+                    if title:
+                        ret = f"标题: {title}\n链接: {url}"
+                    else:
+                        ret = f"链接: {url}"
+                    await event.send(event.plain_result(ret))
 
-                    news = meta.get("news", {})
-                    tag = news.get("tag", "")
-                    jumpurl = news.get("jumpUrl", "")
-                    news_title = news.get("title", "")
-                    if tag == "哔哩哔哩" and jumpurl:
-                        if "https://b23.tv" in jumpurl:
-                            jumpurl = await self.bili_client.b23_to_bv(
-                                jumpurl
-                            )
-                        ret = f"标题: {news_title}\n链接: {jumpurl}"
-                        await event.send(event.plain_result(ret))
                 except json.JSONDecodeError:
                     logger.error(
-                        f"Failed to decode JSON string: {json_string}"
+                        f"Failed to decode JSON string: {json_string[:100]}..."
                     )
                 except Exception as e:
                     logger.error(
                         f"An error occurred during JSON processing: {e}"
                     )
+                finally:
+                    event.stop_event()
 
     # =====================================================================
     # Help commands
@@ -783,6 +975,64 @@ class ParserPlugin(Star):
         self.cfg.add_blacklist(umo)
         yield event.plain_result("当前会话的解析已关闭")
 
+    # =====================================================================
+    # Cookie 登录命令（手动配置各平台 Cookie）
+    # =====================================================================
+
+    def _set_parser_cookies(self, platform_name: str, cookies: str) -> bool:
+        """设置指定平台的 cookie 并保存配置"""
+        parser_cfg = getattr(self.cfg.parser, platform_name, None)
+        if parser_cfg is None:
+            return False
+        parser_cfg.cookies = cookies
+        self.cfg.save_config()
+        return True
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("cookie_twitter", alias={"设置推特cookie", "设置推特Cookie"})
+    async def cookie_twitter(self, event: AstrMessageEvent, cookies: GreedyStr):
+        """设置 Twitter/X Cookie（JSON 格式或 key=val;... 格式）"""
+        if self._set_parser_cookies("twitter", str(cookies)):
+            yield event.plain_result("✅ Twitter Cookie 已保存，请重启 AstrBot 生效。")
+        else:
+            yield event.plain_result("❌ Twitter 解析器未配置。")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("cookie_weibo", alias={"设置微博cookie", "设置微博Cookie"})
+    async def cookie_weibo(self, event: AstrMessageEvent, cookies: GreedyStr):
+        """设置微博 Cookie（key=val;... 格式）"""
+        if self._set_parser_cookies("weibo", str(cookies)):
+            yield event.plain_result("✅ 微博 Cookie 已保存，请重启 AstrBot 生效。")
+        else:
+            yield event.plain_result("❌ 微博解析器未配置。")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("cookie_xhs", alias={"设置小红书cookie", "设置小红书Cookie"})
+    async def cookie_xhs(self, event: AstrMessageEvent, cookies: GreedyStr):
+        """设置小红书 Cookie（key=val;... 格式）"""
+        if self._set_parser_cookies("xhs", str(cookies)):
+            yield event.plain_result("✅ 小红书 Cookie 已保存，请重启 AstrBot 生效。")
+        else:
+            yield event.plain_result("❌ 小红书解析器未配置。")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("cookie_youtube", alias={"设置油管cookie", "设置油管Cookie"})
+    async def cookie_youtube(self, event: AstrMessageEvent, cookies: GreedyStr):
+        """设置 YouTube Cookie（Netscape cookie 文件内容或 key=val;... 格式）"""
+        if self._set_parser_cookies("youtube", str(cookies)):
+            yield event.plain_result("✅ YouTube Cookie 已保存，请重启 AstrBot 生效。")
+        else:
+            yield event.plain_result("❌ YouTube 解析器未配置。")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("cookie_kujiequ", alias={"设置库街区cookie", "设置库街区Cookie"})
+    async def cookie_kujiequ(self, event: AstrMessageEvent, cookies: GreedyStr):
+        """设置库街区 Cookie（user_token=xxx 格式）"""
+        if self._set_parser_cookies("kujiequ", str(cookies)):
+            yield event.plain_result("✅ 库街区 Cookie 已保存，请重启 AstrBot 生效。")
+        else:
+            yield event.plain_result("❌ 库街区解析器未配置。")
+
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("登录B站", alias={"blogin", "登录b站"})
     async def login_bilibili(self, event: AstrMessageEvent):
@@ -813,7 +1063,7 @@ class ParserPlugin(Star):
         qr_path = os.path.join(tempfile.gettempdir(), "qrcode.png")
 
         yield event.chain_result(
-            [Image.fromFile(qr_path)]
+            [Image.fromFileSystem(qr_path)]
         ).message("请使用 Bilibili App 扫描下方二维码登录：")
 
         try:
@@ -1100,6 +1350,103 @@ class ParserPlugin(Star):
             sub_user, render_data, None
         )
         event.stop_event()
+
+    # =====================================================================
+    # Multi-platform subscription commands
+    # =====================================================================
+
+    @filter.command("sub", alias={"多平台订阅"})
+    async def multi_sub(self, event: AstrMessageEvent, platform: str, uid: str):
+        """订阅多平台用户。用法: /sub <平台> <uid>
+        支持平台: xhs, kujiequ, weibo, telegram, twitter, youtube"""
+        sub_user = event.unified_msg_origin
+        platform = platform.lower()
+
+        if platform not in self._multi_subscribers:
+            yield event.plain_result(
+                f"不支持的平台: {platform}\n"
+                f"支持的平台: {', '.join(self._multi_subscribers.keys())}"
+            )
+            return
+
+        if not uid.strip():
+            yield event.plain_result("请提供用户 UID")
+            return
+
+        # 检查是否已订阅
+        existing = self.bili_data_manager.get_subscription(sub_user, uid)
+        if existing and existing.platform == platform:
+            yield event.plain_result(f"已订阅该用户 ({platform}/{uid})")
+            return
+
+        # 获取用户信息
+        subscriber = self._multi_subscribers[platform]
+        user_info = None
+        try:
+            user_info = await subscriber.get_user_info(uid)
+        except Exception as e:
+            logger.warning(f"[多平台订阅] 获取用户信息失败: {e}")
+
+        # 创建订阅记录
+        record = SubscriptionRecord(uid=uid, platform=platform)
+        await self.bili_data_manager.add_subscription(sub_user, record)
+
+        name = user_info.name if user_info else uid
+        handle = user_info.handle if user_info and user_info.handle else ""
+        fans = str(user_info.follower_count) if user_info and user_info.follower_count else ""
+
+        display_parts = [f"平台: {platform}", f"用户: {name}"]
+        if handle:
+            display_parts.append(f"ID: {handle}")
+        if fans:
+            display_parts.append(f"粉丝: {fans}")
+
+        yield event.plain_result(
+            f"订阅成功！\n" + "\n".join(display_parts)
+        )
+
+    @filter.command("sub_list", alias={"多平台订阅列表"})
+    async def multi_sub_list(self, event: AstrMessageEvent):
+        """查看多平台订阅列表"""
+        sub_user = event.unified_msg_origin
+        subs = self.bili_data_manager.get_subscriptions_by_user(sub_user)
+
+        if not subs:
+            yield event.plain_result("无多平台订阅")
+            return
+
+        # 按平台分组
+        platform_subs: dict[str, list] = {}
+        for sub in subs:
+            if sub.platform in self._multi_subscribers:
+                platform_subs.setdefault(sub.platform, []).append(sub)
+
+        if not platform_subs:
+            yield event.plain_result("无多平台订阅")
+            return
+
+        lines = ["多平台订阅列表："]
+        for platform, sub_list in platform_subs.items():
+            for idx, sub in enumerate(sub_list):
+                lines.append(f"  [{platform}] UID: {sub.uid}")
+                if sub.filter_types:
+                    lines.append(f"    过滤类型: {', '.join(sub.filter_types)}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("sub_del", alias={"多平台订阅删除"})
+    async def multi_sub_del(self, event: AstrMessageEvent, platform: str, uid: str):
+        """删除多平台订阅。用法: /sub_del <平台> <uid>"""
+        sub_user = event.unified_msg_origin
+        platform = platform.lower()
+
+        if platform not in self._multi_subscribers:
+            yield event.plain_result(f"不支持的平台: {platform}")
+            return
+
+        if await self.bili_data_manager.remove_subscription(sub_user, uid):
+            yield event.plain_result(f"已删除订阅 ({platform}/{uid})")
+        else:
+            yield event.plain_result("未找到指定的订阅")
 
     # =====================================================================
     # Music commands

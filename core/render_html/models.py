@@ -42,6 +42,7 @@ class ForwardPayload:
     url: str = ""
     title: str = ""
     type: str = ""
+    platform_display: str = ""
     summary: str = ""
     uid: str = ""
     banner: str = ""
@@ -60,6 +61,7 @@ class ForwardPayload:
             url=str(raw.get("url", "") or ""),
             title=str(raw.get("title", "") or ""),
             type=str(raw.get("type", "") or ""),
+            platform_display=str(raw.get("platform_display", "") or ""),
             summary=str(raw.get("summary", "") or ""),
             uid=str(raw.get("uid", "") or ""),
             banner=str(raw.get("banner", "") or ""),
@@ -76,6 +78,7 @@ class ForwardPayload:
             "url": self.url,
             "title": self.title,
             "type": self.type,
+            "platform_display": self.platform_display,
             "summary": self.summary,
             "uid": self.uid,
             "banner": self.banner,
@@ -93,6 +96,8 @@ class RenderPayload:
     url: str = ""
     title: str = ""
     type: str = ""
+    platform_display: str = ""
+    """平台显示名（如"B站"、"小红书"），用于卡片标签渲染，区别于内部类型名"""
     summary: str = ""
     uid: str = ""
     banner: str = ""
@@ -102,9 +107,18 @@ class RenderPayload:
     follower_count: str = ""
     stats: Dict[str, Any] = field(default_factory=dict)
     pinned_comment: Optional[Dict[str, Any]] = None
+    hot_comment: Optional[Dict[str, Any]] = None
     comments: List[Dict[str, Any]] = field(default_factory=list)
     platform_color: str = "#fb7299"
     card_width: str = "1440px"
+    font_scale: float = 1.0
+    """字体缩放因子（1.0=基准，>1=放大）"""
+    timestamp: str = ""
+    bvid: str = ""
+    handle: str = ""
+    """平台专属ID（如 Twitter @handle、小红书号等）"""
+    songs: List[Dict[str, Any]] = field(default_factory=list)
+    """音乐列表数据（name, artists, duration）"""
 
     @classmethod
     def from_dict(cls, raw: Optional[Dict[str, Any]]) -> "RenderPayload":
@@ -126,6 +140,7 @@ class RenderPayload:
             url=str(raw.get("url", "") or ""),
             title=str(raw.get("title", "") or ""),
             type=str(raw.get("type", "") or ""),
+            platform_display=str(raw.get("platform_display", "") or ""),
             summary=str(raw.get("summary", "") or ""),
             uid=str(raw.get("uid", "") or ""),
             banner=str(raw.get("banner", "") or ""),
@@ -134,9 +149,15 @@ class RenderPayload:
             follower_count=str(raw.get("follower_count", "") or ""),
             stats=raw.get("stats", {}),
             pinned_comment=raw.get("pinned_comment"),
+            hot_comment=raw.get("hot_comment"),
             comments=raw.get("comments", []),
             platform_color=str(raw.get("platform_color", "#fb7299")),
             card_width=str(raw.get("card_width", "1440px")),
+            font_scale=float(raw.get("font_scale", 1.0) or 1.0),
+            timestamp=str(raw.get("timestamp", "") or ""),
+            bvid=str(raw.get("bvid", "") or ""),
+            handle=str(raw.get("handle", "") or ""),
+            songs=raw.get("songs", []) if isinstance(raw.get("songs"), list) else [],
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -150,6 +171,7 @@ class RenderPayload:
             "url": self.url,
             "title": self.title,
             "type": self.type,
+            "platform_display": self.platform_display,
             "summary": self.summary,
             "uid": self.uid,
             "banner": self.banner,
@@ -158,11 +180,19 @@ class RenderPayload:
             "stats": self.stats,
             "platform_color": self.platform_color,
             "card_width": self.card_width,
+            "font_scale": self.font_scale,
+            "timestamp": self.timestamp,
+            "bvid": self.bvid,
+            "handle": self.handle,
         }
+        if self.songs:
+            payload["songs"] = self.songs
         if self.forward:
             payload["forward"] = self.forward.to_dict()
         if self.pinned_comment:
             payload["pinned_comment"] = self.pinned_comment
+        if self.hot_comment:
+            payload["hot_comment"] = self.hot_comment
         if self.comments:
             payload["comments"] = self.comments
         return payload
@@ -214,7 +244,7 @@ class DynamicParseResult:
 
 @dataclass
 class SubscriptionRecord:
-    uid: int
+    uid: str
     platform: str = "bilibili"
     last: str = ""
     is_live: bool = False
@@ -226,8 +256,10 @@ class SubscriptionRecord:
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "SubscriptionRecord":
-        uid = _to_int(raw.get("uid"), default=-1)
-        if uid < 0:
+        raw_uid = raw.get("uid", "")
+        # 向后兼容：支持 int 和 str 类型的 uid
+        uid = str(raw_uid).strip()
+        if not uid:
             raise ValueError(f"invalid uid: {raw.get('uid')}")
         return cls(
             uid=uid,

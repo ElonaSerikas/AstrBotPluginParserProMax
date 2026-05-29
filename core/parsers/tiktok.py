@@ -3,7 +3,7 @@ from typing import ClassVar
 
 from ..config import PluginConfig
 from ..cookie import CookieJar
-from ..data import Author, Platform, VideoContent
+from ..data import Platform, VideoContent
 from ..download import Downloader
 from .base import BaseParser, handle
 
@@ -24,6 +24,7 @@ class TikTokParser(BaseParser):
     async def _parse(self, searched: re.Match[str]):
         # 从匹配对象中获取原始URL
         url, prefix = searched.group(0), searched.group(1)
+        original_url = f"https://{url}"
 
         if prefix in ("vt", "vm"):
             url = await self.get_redirect_url(url)
@@ -45,9 +46,23 @@ class TikTokParser(BaseParser):
             format="best",
         )
 
+        # 统计数据
+        stats = {}
+        if video_info.view_count is not None:
+            stats["views"] = str(video_info.view_count)
+        if video_info.like_count is not None:
+            stats["likes"] = str(video_info.like_count)
+        if video_info.comment_count is not None:
+            stats["comments"] = str(video_info.comment_count)
+        if video_info.repost_count is not None:
+            stats["reposts"] = str(video_info.repost_count)
+
         return self.result(
             title=video_info.title,
-            author=Author(name=video_info.channel),
+            url=original_url,
+            author=self.create_author(name=video_info.channel, uid=video_info.channel_id, description=video_info.description or None),
             contents=[VideoContent(video, cover, duration=video_info.duration)],
             timestamp=video_info.timestamp,
+            stats=stats,
+            extra={"uid": str(video_info.channel_id or ""), "post_id": video_info.id or "", "handle": f"@{video_info.channel}"} if video_info.channel else {"uid": str(video_info.channel_id or ""), "post_id": video_info.id or ""},
         )

@@ -167,10 +167,12 @@ class ParserConfig(ConfigNodeContainer):
     acfun: ParserItem
     bilibili: ParserItem
     douyin: ParserItem
+    facebook: ParserItem
     instagram: ParserItem
     kuaishou: ParserItem
     ncm: ParserItem
     nga: ParserItem
+    telegram: ParserItem
     tiktok: ParserItem
     twitter: ParserItem
     weibo: ParserItem
@@ -213,6 +215,7 @@ class PluginConfig(ConfigNode):
     forward_threshold: int
 
     show_download_fail_tip: bool
+    debug_mode: bool
     download_timeout: int
     download_retry_times: int
     common_timeout: int
@@ -353,7 +356,10 @@ class PluginConfig(ConfigNode):
 
     @property
     def real_send_modes(self) -> list[str] | None:
-        return self.music_send_modes
+        raw = self.music_send_modes
+        if isinstance(raw, str):
+            return [m.split("(", 1)[0].strip() for m in raw.split(",") if m.strip()]
+        return raw
 
     @real_send_modes.setter
     def real_send_modes(self, value: list[str] | None) -> None:
@@ -377,7 +383,10 @@ class PluginConfig(ConfigNode):
 
     @property
     def record_supported(self) -> list[str] | None:
-        return self.music_record_supported
+        raw = self.music_record_supported
+        if isinstance(raw, str):
+            return [m.strip() for m in raw.split(",") if m.strip()]
+        return raw
 
     @record_supported.setter
     def record_supported(self, value: list[str] | None) -> None:
@@ -385,7 +394,10 @@ class PluginConfig(ConfigNode):
 
     @property
     def file_supported(self) -> list[str] | None:
-        return self.music_file_supported
+        raw = self.music_file_supported
+        if isinstance(raw, str):
+            return [m.strip() for m in raw.split(",") if m.strip()]
+        return raw
 
     @file_supported.setter
     def file_supported(self, value: list[str] | None) -> None:

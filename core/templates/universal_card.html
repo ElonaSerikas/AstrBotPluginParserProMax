@@ -18,7 +18,8 @@
     --radius-md: 16px;
     --radius-sm: 8px;
     --shadow-card: 0 16px 40px rgba(251, 114, 153, 0.15), 0 4px 12px rgba(0,0,0,0.05);
-    --font-family: "Nunito", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-family: "MisansTC", "Nunito", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-scale: {{ font_scale | default(1.0) }};
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,6 +41,7 @@ body {
     box-shadow: var(--shadow-card);
     overflow: hidden;
     position: relative;
+    zoom: var(--font-scale);
 }
 
 /* 顶部装饰条 - B站招牌设计 */
@@ -69,7 +71,7 @@ body {
 
 .header-left {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
     flex: 1;
     min-width: 0;
@@ -77,8 +79,8 @@ body {
 
 .avatar-container {
     position: relative;
-    width: 54px;
-    height: 54px;
+    width: 72px;
+    height: 72px;
     flex-shrink: 0;
 }
 
@@ -106,6 +108,13 @@ body {
     min-width: 0;
 }
 
+.header-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 8px;
+}
+
 .up-name {
     font-size: 18px;
     font-weight: 800;
@@ -115,11 +124,25 @@ body {
     text-overflow: ellipsis;
 }
 
+.dynamic-badge {
+    font-size: 11px;
+    background: var(--pink-light);
+    color: var(--pink);
+    border-radius: 6px;
+    padding: 1px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 12px;
+    align-self: flex-start;
+    margin-top: 0;
+}
+
 .up-meta {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 2px;
+    margin-top: 6px;
 }
 
 .uid-tag {
@@ -132,11 +155,12 @@ body {
     white-space: nowrap;
 }
 
-.dynamic-badge {
+.bvid-tag {
     font-size: 11px;
-    background: var(--pink-light);
-    color: var(--pink);
-    border-radius: 6px;
+    color: #008ac5;
+    background: rgba(0,138,197,0.1);
+    border: 1px solid rgba(0,138,197,0.3);
+    border-radius: 12px;
     padding: 1px 8px;
     white-space: nowrap;
 }
@@ -163,10 +187,9 @@ body {
 
 /* ===== 签名 ===== */
 .signature {
-    padding: 4px 24px 8px;
     font-size: 13px;
     color: var(--text-secondary);
-    background: linear-gradient(180deg, #feedf6 0%, #ffdce8 100%);
+    margin-top: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -174,14 +197,14 @@ body {
 
 /* ===== 标题 ===== */
 .title {
-    padding: 4px 24px;
+    margin: 8px 24px;
+    padding: 6px 16px;
     font-size: 14px;
     color: #b85c76;
     background: #fff0f5;
     border-left: 4px solid var(--pink);
-    border-radius: 0 6px 6px 0;
+    border-radius: 6px;
     width: fit-content;
-    margin: 0 24px 8px;
     max-width: calc(100% - 48px);
 }
 
@@ -210,6 +233,17 @@ body {
     background: rgba(35, 173, 229, 0.08);
     border-radius: 4px;
     text-decoration: none;
+}
+
+.text-body .hashtag {
+    color: var(--blue) !important;
+    font-weight: 600;
+}
+
+.publish-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
 }
 
 /* ===== 统计信息 ===== */
@@ -408,7 +442,7 @@ body {
 <body>
 <div class="card">
     {% if banner %}
-    <img class="banner-img" src="{{ banner }}" alt="banner">
+    <img class="banner-img" src="{{ banner }}" alt="banner" onerror="this.style.display='none'">
     {% endif %}
     <!-- Header -->
     <div class="header">
@@ -416,38 +450,47 @@ body {
             <div class="avatar-container">
                 {% if avatar %}
                 <img class="up-avatar" src="{{ avatar }}" alt="avatar"
-                     onerror="this.src='data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23f0f0f0%22/&gt;&lt;/svg&gt;'">
+                     onerror="this.style.display='none'">
                 {% endif %}
                 {% if pendant %}
-                <img class="up-pendant" src="{{ pendant }}" alt="pendant">
+                <img class="up-pendant" src="{{ pendant }}" alt="pendant" onerror="this.style.display='none'">
                 {% endif %}
             </div>
             <div class="header-info">
-                <div class="up-name">{{ name }}</div>
+                <div class="header-top-row">
+                    <div class="up-name">{{ name }}</div>
+                </div>
                 <div class="up-meta">
                     {% if uid %}
                     <span class="uid-tag">UID {{ uid }}</span>
                     {% endif %}
-                    {% if type %}
-                    <span class="dynamic-badge">{{ type }}</span>
+                    {% if handle %}
+                    <span class="uid-tag">{{ handle }}</span>
+                    {% endif %}
+                    {% if bvid %}
+                    <span class="bvid-tag">{{ bvid }}</span>
                     {% endif %}
                     {% if follower_count %}
                     <span class="followers">{{ follower_count }} 粉丝</span>
                     {% endif %}
                 </div>
+                {% if signature %}
+                <div class="signature">{{ signature }}</div>
+                {% endif %}
+                {% if timestamp %}
+                <div class="publish-time">{{ timestamp }}</div>
+                {% endif %}
             </div>
         </div>
+        {% if platform_display or type %}
+        <span class="dynamic-badge">{{ platform_display or type }}</span>
+        {% endif %}
         {% if qrcode %}
         <div class="qrcode-container">
-            <img class="qrcode-img" src="{{ qrcode }}" alt="QR">
+            <img class="qrcode-img" src="{{ qrcode }}" alt="QR" onerror="this.parentElement.style.display='none'">
         </div>
         {% endif %}
     </div>
-
-    <!-- 签名 -->
-    {% if signature %}
-    <div class="signature">{{ signature }}</div>
-    {% endif %}
 
     <!-- 标题 -->
     {% if title %}
@@ -464,6 +507,8 @@ body {
         {% if stats.coins %}<span class="stat-item"><span>{{ stats.coins }}</span> 硬币</span>{% endif %}
         {% if stats.comments %}<span class="stat-item"><span>{{ stats.comments }}</span> 评论</span>{% endif %}
         {% if stats.reposts %}<span class="stat-item"><span>{{ stats.reposts }}</span> 转发</span>{% endif %}
+        {% if stats.quotes %}<span class="stat-item"><span>{{ stats.quotes }}</span> 引用</span>{% endif %}
+        {% if stats.bookmarks %}<span class="stat-item"><span>{{ stats.bookmarks }}</span> 书签</span>{% endif %}
     </div>
     {% endif %}
 
@@ -481,7 +526,7 @@ body {
         {% if image_urls %}
         <div class="image-gallery">
             {% for img in image_urls %}
-            <div class="img-box"><img src="{{ img }}" alt="image"></div>
+            <div class="img-box"><img src="{{ img }}" alt="image" loading="lazy" onerror="this.parentElement.style.display='none'"></div>
             {% endfor %}
         </div>
         {% endif %}
@@ -495,6 +540,18 @@ body {
             </div>
             <div class="pc-content">{{ pinned_comment.content }}</div>
             <div class="pc-likes">👍 {{ pinned_comment.likes }}</div>
+        </div>
+        {% endif %}
+
+        <!-- 热评 -->
+        {% if hot_comment %}
+        <div class="pinned-comment">
+            <div class="pc-header">
+                <span class="pc-author">{{ hot_comment.author }}</span>
+                <span> · {{ hot_comment.time }}</span>
+            </div>
+            <div class="pc-content">{{ hot_comment.content }}</div>
+            <div class="pc-likes">👍 {{ hot_comment.likes }}</div>
         </div>
         {% endif %}
 
@@ -524,7 +581,7 @@ body {
         <div class="forward-box">
             <div class="forward-header">
                 {% if forward.avatar %}
-                <img class="forward-avatar" src="{{ forward.avatar }}" alt="">
+                <img class="forward-avatar" src="{{ forward.avatar }}" alt="" onerror="this.style.display='none'">
                 {% endif %}
                 <span class="forward-name">@{{ forward.name }}</span>
             </div>
@@ -537,7 +594,7 @@ body {
             {% if forward.image_urls %}
             <div class="image-gallery">
                 {% for img in forward.image_urls %}
-                <div class="img-box"><img src="{{ img }}" alt="image"></div>
+                <div class="img-box"><img src="{{ img }}" alt="image" loading="lazy" onerror="this.parentElement.style.display='none'"></div>
                 {% endfor %}
             </div>
             {% endif %}

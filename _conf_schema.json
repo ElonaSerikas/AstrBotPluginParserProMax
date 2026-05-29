@@ -71,7 +71,7 @@
             "max": 20,
             "step": 1
         },
-        "default": 5
+        "default": 4
     },
     "show_download_fail_tip": {
         "description": "提示下载失败项",
@@ -122,7 +122,7 @@
         "description": "使用HTML渲染",
         "hint": "开启后使用HTML渲染卡片（需浏览器驱动），关闭则使用PIL渲染",
         "type": "bool",
-        "default": false
+        "default": true
     },
     "plain_push_template": {
         "description": "纯文本推送模板",
@@ -135,12 +135,6 @@
         "hint": "渲染卡片的宽度，建议 800-1920px",
         "type": "int",
         "default": 1440
-    },
-    "sessdata": {
-        "description": "sessdata (B站登录凭据)",
-        "type": "string",
-        "hint": "B站 SESSDATA cookie的值，用于订阅功能。获取：登录bilibili.com→F12→Application→Cookies→复制sessdata的值",
-        "invisible": false
     },
     "bangumi_token": {
         "description": "Bangumi Token",
@@ -260,17 +254,19 @@
     "music_send_modes": {
         "description": "音乐发送模式列表",
         "type": "string",
-        "hint": "逗号分隔，可选: card,record,file,image,text",
+        "hint": "逗号分隔，可选: card(卡片图), record(语音), file(文件), image(封面图), text(纯文字)",
         "default": "card,text"
     },
     "music_record_supported": {
         "description": "支持语音播放的平台",
         "type": "string",
+        "hint": "逗号分隔，可选: ncm(网易云), qq(QQ音乐), kugou(酷狗), kuwo(酷我), baidu(百度), migu(咪咕)",
         "default": "ncm"
     },
     "music_file_supported": {
         "description": "支持文件发送的平台",
         "type": "string",
+        "hint": "逗号分隔，可选: ncm(网易云), qq(QQ音乐), kugou(酷狗), kuwo(酷我), baidu(百度), migu(咪咕)",
         "default": "ncm,netease"
     },
     "music_clear_cache": {
@@ -373,25 +369,8 @@
                         ],
                         "default": "_8K"
                     },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
-                    },
                     "audio_quality": {
-                        "description": "B站音频质量",
+                        "description": "首选音质",
                         "type": "string",
                         "default": "hi_res",
                         "options": [
@@ -415,7 +394,7 @@
                         "default": true
                     },
                     "parse_bv": {
-                        "description": "解析BV/AV号",
+                        "description": "解析BV号",
                         "type": "bool",
                         "default": true
                     },
@@ -428,6 +407,17 @@
                         "description": "解析专栏",
                         "type": "bool",
                         "default": true
+                    },
+                    "parse_av": {
+                        "description": "解析AV号",
+                        "type": "bool",
+                        "default": true
+                    },
+                    "sessdata": {
+                        "description": "sessdata (B站登录凭据)",
+                        "type": "string",
+                        "hint": "登录bilibili.com→F12→Application→Cookies→复制sessdata的值",
+                        "invisible": true
                     }
                 }
             },
@@ -467,23 +457,6 @@
                             "中等画质",
                             "高画质",
                             "最高画质"
-                        ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
                         ]
                     }
                 }
@@ -525,23 +498,6 @@
                             "高画质",
                             "最高画质"
                         ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
                     }
                 }
             },
@@ -582,23 +538,6 @@
                             "高画质",
                             "最高画质"
                         ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
                     }
                 }
             },
@@ -620,21 +559,6 @@
                         "hint": "选填, 小红书部分链接解析有水印, 填充Cookies可去除水印",
                         "type": "text",
                         "default": ""
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps"
-                        ]
                     },
                     "video_quality": {
                         "description": "首选画质",
@@ -753,23 +677,6 @@
                             "高画质",
                             "最高画质"
                         ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
                     }
                 }
             },
@@ -818,23 +725,6 @@
                             "2160P(4K)",
                             "4320P(8K)"
                         ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
                     }
                 }
             },
@@ -875,23 +765,33 @@
                             "高画质",
                             "最高画质"
                         ]
+                    }
+                }
+            },
+            "telegram": {
+                "name": "Telegram 解析器",
+                "items": {
+                    "enable": {
+                        "description": "启用",
+                        "type": "bool",
+                        "default": true
                     },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
+                    "use_proxy": {
+                        "description": "使用代理",
+                        "type": "bool",
+                        "default": true
+                    },
+                    "cookies": {
+                        "description": "Cookies",
+                        "hint": "选填",
+                        "type": "text",
+                        "default": ""
+                    },
+                    "bot_token": {
+                        "description": "Bot Token（可选）",
+                        "hint": "用于解析私有频道。通过 @BotFather 创建 Bot 获取 Token。Bot 需为私有频道成员",
+                        "type": "text",
+                        "default": ""
                     }
                 }
             },
@@ -931,23 +831,6 @@
                             "中等画质",
                             "高画质",
                             "最高画质"
-                        ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
                         ]
                     }
                 }
@@ -989,23 +872,6 @@
                             "高画质",
                             "最高画质"
                         ]
-                    },
-                    "preferred_fps": {
-                        "description": "首选帧率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "30",
-                            "60",
-                            "120"
-                        ],
-                        "labels": [
-                            "自动",
-                            "30fps",
-                            "60fps",
-                            "120fps"
-                        ]
                     }
                 }
             },
@@ -1029,7 +895,7 @@
                         "default": ""
                     },
                     "audio_quality": {
-                        "description": "网易云音质",
+                        "description": "首选音质",
                         "type": "string",
                         "default": "hi_res_plus",
                         "options": [
@@ -1051,25 +917,6 @@
                             "超清母带",
                             "沉浸环绕声",
                             "杜比全景声"
-                        ]
-                    },
-                    "audio_bitrate": {
-                        "description": "音频码率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "128k",
-                            "192k",
-                            "320k",
-                            "lossless"
-                        ],
-                        "labels": [
-                            "自动",
-                            "128kbps",
-                            "192kbps",
-                            "320kbps",
-                            "无损"
                         ]
                     }
                 }
@@ -1136,7 +983,7 @@
                         "default": ""
                     },
                     "audio_quality": {
-                        "description": "QQ音乐音质",
+                        "description": "首选音质",
                         "type": "string",
                         "default": "lossless",
                         "options": [
@@ -1154,25 +1001,6 @@
                             "Hi-Res",
                             "臻品母带",
                             "杜比全景声"
-                        ]
-                    },
-                    "audio_bitrate": {
-                        "description": "音频码率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "128k",
-                            "192k",
-                            "320k",
-                            "lossless"
-                        ],
-                        "labels": [
-                            "自动",
-                            "128kbps",
-                            "192kbps",
-                            "320kbps",
-                            "无损"
                         ]
                     }
                 }
@@ -1302,7 +1130,7 @@
                         "default": ""
                     },
                     "audio_quality": {
-                        "description": "酷狗音质",
+                        "description": "首选音质",
                         "type": "string",
                         "default": "lossless",
                         "options": [
@@ -1320,25 +1148,6 @@
                             "Hi-Res",
                             "蝰蛇母带",
                             "杜比全景声"
-                        ]
-                    },
-                    "audio_bitrate": {
-                        "description": "音频码率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "128k",
-                            "192k",
-                            "320k",
-                            "lossless"
-                        ],
-                        "labels": [
-                            "自动",
-                            "128kbps",
-                            "192kbps",
-                            "320kbps",
-                            "无损"
                         ]
                     }
                 }
@@ -1363,7 +1172,7 @@
                         "default": ""
                     },
                     "audio_quality": {
-                        "description": "酷我音质",
+                        "description": "首选音质",
                         "type": "string",
                         "default": "lossless",
                         "options": [
@@ -1382,28 +1191,15 @@
                             "至臻母带",
                             "杜比全景声"
                         ]
-                    },
-                    "audio_bitrate": {
-                        "description": "音频码率",
-                        "type": "string",
-                        "default": "0",
-                        "options": [
-                            "0",
-                            "128k",
-                            "192k",
-                            "320k",
-                            "lossless"
-                        ],
-                        "labels": [
-                            "自动",
-                            "128kbps",
-                            "192kbps",
-                            "320kbps",
-                            "无损"
-                        ]
                     }
                 }
             }
         }
+    },
+    "debug_mode": {
+        "description": "调试模式",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后输出详细调试日志"
     }
 }

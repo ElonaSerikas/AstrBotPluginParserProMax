@@ -10,6 +10,7 @@
 
 import base64
 import re as _re
+import time as _time
 from asyncio import TimeoutError, sleep
 from re import Match
 from typing import Any, ClassVar
@@ -19,6 +20,7 @@ from aiohttp import ClientError
 from ..config import PluginConfig
 from ..data import (
     AudioContent,
+    Comment,
     ImageContent,
     LyricLine,
     MusicInfo,
@@ -146,6 +148,82 @@ class QQMusicParser(BaseParser):
                 lines.append(LyricLine(time=t, text=m.group(4).strip()))
         return lines
 
+    async def _get_singer_detail(self, singermid: str) -> dict:
+        """获取歌手详情（粉丝数、签名等）"""
+        try:
+            data = await self._musicu({
+                "singer": {
+                    "module": "music.pf_singer_detail_svr",
+                    "method": "get_singer_detail",
+                    "param": {
+                        "singermid": singermid,
+                        "begin": 0,
+                        "num": 1,
+                    },
+                }
+            })
+            sd = data.get("singer", {}).get("data", {})
+            si = sd.get("singer_info", {}) or sd
+            return {
+                "follower_count": si.get("fans", 0) or si.get("total_fans", 0),
+                "description": si.get("desc", "") or si.get("brief_desc", ""),
+                "avatar": si.get("pic", "") or si.get("avatar", ""),
+            }
+        except Exception:
+            return {}
+
+    async def _get_comments(self, songmid: str) -> tuple[Comment | None, Comment | None, int]:
+        """获取置顶评论、热评和评论总数（失败返回 (None, None, 0)）"""
+        try:
+            data = await self._musicu({
+                "comment": {
+                    "module": "music.globalComment.CommentRead",
+                    "method": "GetCommentList",
+                    "param": {
+                        "bizType": 1,
+                        "bizId": songmid,
+                        "commentId": "",
+                        "pageNum": 0,
+                        "pageSize": 20,
+                        "orderBy": 1,  # 按热度排序
+                    },
+                }
+            })
+            comments_data = data.get("comment", {}).get("data", {})
+            comments = comments_data.get("CommentList", []) or comments_data.get("commentList", [])
+            comment_count = comments_data.get("commentCount", 0) or comments_data.get("total", 0) or len(comments)
+            if not comments:
+                return None, None, 0
+
+            def _build_comment(c: dict) -> Comment | None:
+                content = c.get("content", "") or c.get("msg", "")
+                if not content:
+                    return None
+                user = c.get("userinfo", {}) or c.get("user", {})
+                return Comment(
+                    author_name=user.get("nick", "") or user.get("nickname", ""),
+                    content=content,
+                    author_avatar=user.get("avatar", "") or user.get("headurl", ""),
+                    likes=c.get("praisenum", 0) or c.get("likeNum", 0),
+                    is_hot=True,
+                )
+
+            pinned_comment = None
+            hot_comment = None
+            for c in comments[:5]:
+                built = _build_comment(c)
+                if not built:
+                    continue
+                if not pinned_comment:
+                    pinned_comment = built
+                elif not hot_comment:
+                    hot_comment = built
+                    break
+
+            return pinned_comment, hot_comment, comment_count
+        except Exception:
+            return None, None, 0
+
     @staticmethod
     def _song_track(track: dict[str, Any]) -> dict[str, Any]:
         """从 track_info 提取显示的曲目信息"""
@@ -177,11 +255,11 @@ class QQMusicParser(BaseParser):
 
     @handle(
         "y.qq.com/n/yqq/song",
-        r"y\.qq\.com/n/yqq/song/(?P<songmid>[A-Za-z0-9]+)\.html",
+        r"y\.qq\.com/n/yqq/song/(?P<songmid>[A-Za-z0-9]+)\.html\/?(?:\?.*)?$",
     )
     @handle(
         "i.y.qq.com/v8/playsong.html",
-        r"i\.y\.qq\.com/v8/playsong\.html\?.*songid=(?P<songid>\d+)",
+        r"i\.y\.qq\.com/v8/playsong\.html\?.*songid=(?P<songid>\d+)(?:&.*)?$",
     )
     async def _parse_song(self, searched: Match[str]) -> ...:  # noqa: ANN401
         groups = searched.groupdict()
@@ -214,8 +292,42 @@ class QQMusicParser(BaseParser):
 
         t = self._song_track(track)
 
-        audio_url = await self._song_play(songmid)
-        lyrics = await self._get_lyrics(songmid)
+        # 提取歌手 uid
+        singers_raw = track.get("singer", [])
+        singer_uid = (
+            str(
+                singers_raw[0].get("mid")
+                or singers_raw[0].get("id")
+                or ""
+            )
+            or None
+            if singers_raw
+            else None
+        )
+
+        # 提取发布时间
+        timestamp = None
+        time_public = track.get("time_public", "")
+        if time_public and isinstance(time_public, str) and len(time_public) == 10:
+            try:
+                timestamp = int(
+                    _time.mktime(_time.strptime(time_public, "%Y-%m-%d"))
+                )
+            except (ValueError, OverflowError):
+                pass
+        if timestamp is None:
+            ts_raw = track.get("ts")
+            if isinstance(ts_raw, (int, float)):
+                timestamp = int(ts_raw)
+
+        # 并发获取：播放地址、歌词、歌手详情、评论
+        import asyncio
+        audio_url, lyrics, singer_info, (pinned_comment, hot_comment, comment_count) = await asyncio.gather(
+            self._song_play(songmid),
+            self._get_lyrics(songmid),
+            self._get_singer_detail(singer_uid) if singer_uid else asyncio.sleep(0, result={}),
+            self._get_comments(songmid),
+        )
 
         contents: list = []
 
@@ -228,6 +340,14 @@ class QQMusicParser(BaseParser):
         if t["cover_url"]:
             contents.extend(self.create_image_contents([t["cover_url"]]))
 
+        # 构建歌手信息
+        follower_count = singer_info.get("follower_count") or None
+        description = singer_info.get("description") or None
+        author = self.create_author(
+            t["singer_names"], uid=singer_uid,
+            description=description, follower_count=follower_count,
+        ) if t["singer_names"] else None
+
         info_parts = []
         if t["singer_names"]:
             info_parts.append(f"歌手：{t['singer_names']}")
@@ -237,13 +357,20 @@ class QQMusicParser(BaseParser):
             m, s = divmod(t["duration"], 60)
             info_parts.append(f"时长：{m}:{s:02d}")
 
+        # 统计数据
+        stats = {}
+        listen_count = track.get("listen_count", 0) or track.get("listenCount", 0)
+        if listen_count:
+            stats["views"] = listen_count
+        if comment_count:
+            stats["comments"] = comment_count
+
         return self.result(
             title=t["display"],
             text="\n".join(info_parts),
-            author=self.create_author(t["singer_names"])
-            if t["singer_names"]
-            else None,
+            author=author,
             contents=contents,
+            timestamp=timestamp,
             url=f"https://y.qq.com/n/yqq/song/{songmid}.html",
             music_info=MusicInfo(
                 title=t["title"],
@@ -253,13 +380,25 @@ class QQMusicParser(BaseParser):
                 duration=t["duration"],
                 lyrics=lyrics,
             ),
+            stats=stats or None,
+            extra={
+                "uid": singer_uid or "",
+                "song_id": songmid,
+                "album_id": track.get("album", {}).get("mid", ""),
+                "singer_id": singer_uid or "",
+                "handle": f"歌手:{t['singer_names']}" if t["singer_names"] else "",
+                "post_id": songmid,
+            },
+            page_type="song",
+            pinned_comment=pinned_comment,
+            hot_comment=hot_comment,
         )
 
     # ======================== album ========================
 
     @handle(
         "y.qq.com/n/yqq/album",
-        r"y\.qq\.com/n/yqq/album/(?P<albummid>[A-Za-z0-9]+)\.html",
+        r"y\.qq\.com/n/yqq/album/(?P<albummid>[A-Za-z0-9]+)\.html\/?(?:\?.*)?$",
     )
     async def _parse_album(self, searched: Match[str]) -> ...:  # noqa: ANN401
         albummid = searched.group("albummid")
@@ -278,6 +417,30 @@ class QQMusicParser(BaseParser):
         cover_url = self._COVER.format(cover_mid)
         singers = info.get("singer", []) or info.get("singers", [])
         singer_names = " / ".join(s.get("name", "") for s in singers)
+        singer_uid = (
+            str(singers[0].get("mid") or singers[0].get("id") or "")
+            or None
+            if singers
+            else None
+        )
+
+        # 提取专辑发布时间
+        album_timestamp = None
+        for key in ("time", "pub_date", "aDate", "timestamp"):
+            raw = info.get(key)
+            if isinstance(raw, (int, float)):
+                album_timestamp = int(raw)
+                if album_timestamp > 10**12:
+                    album_timestamp //= 1000
+                break
+            if isinstance(raw, str) and len(raw) == 10:
+                try:
+                    album_timestamp = int(
+                        _time.mktime(_time.strptime(raw, "%Y-%m-%d"))
+                    )
+                    break
+                except (ValueError, OverflowError):
+                    continue
 
         song_list = album_out.get("list", []) or info.get("list", [])
         total = len(song_list)
@@ -326,18 +489,25 @@ class QQMusicParser(BaseParser):
         return self.result(
             title=name,
             text=info_text,
-            author=self.create_author(singer_names)
+            author=self.create_author(singer_names, uid=singer_uid)
             if singer_names
             else None,
             contents=contents,
+            timestamp=album_timestamp,
             url=f"https://y.qq.com/n/yqq/album/{albummid}.html",
+            extra={
+                "album_id": albummid,
+                "singer_id": singer_uid or "",
+                "post_id": albummid,
+            },
+            page_type="album",
         )
 
     # ======================== playlist ========================
 
     @handle(
         "y.qq.com/n/yqq/playlist",
-        r"y\.qq\.com/n/yqq/playlist/(?P<pid>\d+)\.html",
+        r"y\.qq\.com/n/yqq/playlist/(?P<pid>\d+)\.html\/?(?:\?.*)?$",
     )
     async def _parse_playlist(self, searched: Match[str]) -> ...:  # noqa: ANN401
         pid = searched.group("pid")
@@ -359,6 +529,19 @@ class QQMusicParser(BaseParser):
         title = info.get("name", "") or pl.get("title", "")
         creator = info.get("creator", {}) or pl.get("creator_info", {})
         creator_name = creator.get("name", "") or creator.get("nick", "")
+        creator_uid = str(
+            creator.get("id") or creator.get("uin") or ""
+        ) or None
+
+        # 提取歌单创建时间
+        playlist_timestamp = None
+        for key in ("create_time", "timestamp", "modify_time"):
+            raw = info.get(key) or pl.get(key)
+            if isinstance(raw, (int, float)):
+                playlist_timestamp = int(raw)
+                if playlist_timestamp > 10**12:
+                    playlist_timestamp //= 1000
+                break
 
         song_list = (
             pl.get("song", []) or pl.get("list", []) or pl.get("musicList", [])
@@ -385,18 +568,21 @@ class QQMusicParser(BaseParser):
         return self.result(
             title=title,
             text=info_text,
-            author=self.create_author(creator_name)
+            author=self.create_author(creator_name, uid=creator_uid)
             if creator_name
             else None,
             contents=contents,
+            timestamp=playlist_timestamp,
             url=f"https://y.qq.com/n/yqq/playlist/{pid}.html",
+            extra={"playlist_id": pid, "post_id": pid},
+            page_type="playlist",
         )
 
     # ======================== singer ========================
 
     @handle(
         "y.qq.com/n/yqq/singer",
-        r"y\.qq\.com/n/yqq/singer/(?P<singermid>[A-Za-z0-9]+)\.html",
+        r"y\.qq\.com/n/yqq/singer/(?P<singermid>[A-Za-z0-9]+)\.html\/?(?:\?.*)?$",
     )
     async def _parse_singer(self, searched: Match[str]) -> ...:  # noqa: ANN401
         smid = searched.group("singermid")
@@ -415,6 +601,9 @@ class QQMusicParser(BaseParser):
         sd = data.get("singer", {}).get("data", {})
         si = sd.get("singer_info", {}) or sd
         name = si.get("name", "")
+        singer_uid = str(
+            si.get("id") or si.get("mid") or ""
+        ) or None
 
         song_list = (
             sd.get("list", [])
@@ -435,7 +624,11 @@ class QQMusicParser(BaseParser):
         return self.result(
             title=name or "QQ音乐歌手",
             text=f"歌曲数：{total}",
-            author=self.create_author(name) if name else None,
+            author=self.create_author(name, uid=singer_uid)
+            if name
+            else None,
             contents=contents,
             url=f"https://y.qq.com/n/yqq/singer/{smid}.html",
+            extra={"singer_id": smid, "post_id": smid},
+            page_type="singer",
         )

@@ -212,6 +212,11 @@ def generate_file_name(url: str, default_suffix: str = "") -> str:
 def extract_json_url(data: dict | str) -> str | None:
     """处理 JSON 类型的消息段，提取 URL
 
+    支持所有平台的小程序 JSON 卡片格式，包括但不限于：
+    - 哔哩哔哩: meta.detail_1.qqdocurl
+    - 小红书/微博: meta.news.jumpUrl
+    - 音乐: meta.music.musicUrl / meta.music.jumpUrl
+
     Args:
         data: JSON 类型的消息字典
 
@@ -231,12 +236,33 @@ def extract_json_url(data: dict | str) -> str | None:
     if not meta:
         return None
 
-    for key1, key2 in (
-        ("music", "musicUrl"),
-        ("detail_1", "qqdocurl"),
-        ("news", "jumpUrl"),
-        ("music", "jumpUrl"),
-    ):
-        if url := meta.get(key1, {}).get(key2):
-            return url
+    # 1) 尝试 detail_1.qqdocurl (最常见格式, 哔哩哔哩等)
+    detail = meta.get("detail_1", {})
+    if isinstance(detail, dict):
+        if qqdocurl := detail.get("qqdocurl"):
+            return qqdocurl
+
+    # 2) 尝试 news.jumpUrl (小红书, 微博等)
+    news = meta.get("news", {})
+    if isinstance(news, dict):
+        if jump_url := news.get("jumpUrl"):
+            return jump_url
+
+    # 3) 穷举回退: 遍历所有 section 查找常见 URL 字段名
+    for section in meta.values():
+        if isinstance(section, dict):
+            for field in (
+                "jumpUrl", "qqdocurl", "url", "link",
+                "jump_url", "musicUrl", "playUrl", "videoUrl",
+            ):
+                if url := section.get(field):
+                    return url
+
+    # 4) 尝试 config 段 (部分特殊应用使用)
+    config = meta.get("config", {})
+    if isinstance(config, dict):
+        for field in ("jumpUrl", "qqdocurl", "url", "link", "jump_url", "musicUrl", "playUrl", "videoUrl"):
+            if url := config.get(field):
+                return url
+
     return None
