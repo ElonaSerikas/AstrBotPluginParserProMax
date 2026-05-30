@@ -46,6 +46,10 @@ class ForwardPayload:
     summary: str = ""
     uid: str = ""
     banner: str = ""
+    signature: str = ""
+    follower_count: str = ""
+    timestamp: str = ""
+    stats: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: Optional[Dict[str, Any]]) -> "ForwardPayload":
@@ -65,10 +69,14 @@ class ForwardPayload:
             summary=str(raw.get("summary", "") or ""),
             uid=str(raw.get("uid", "") or ""),
             banner=str(raw.get("banner", "") or ""),
+            signature=str(raw.get("signature", "") or ""),
+            follower_count=str(raw.get("follower_count", "") or ""),
+            timestamp=str(raw.get("timestamp", "") or ""),
+            stats=raw.get("stats", {}) if isinstance(raw.get("stats"), dict) else {},
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "name": self.name,
             "avatar": self.avatar,
             "pendant": self.pendant,
@@ -82,7 +90,13 @@ class ForwardPayload:
             "summary": self.summary,
             "uid": self.uid,
             "banner": self.banner,
+            "signature": self.signature,
+            "follower_count": self.follower_count,
+            "timestamp": self.timestamp,
         }
+        if self.stats:
+            d["stats"] = self.stats
+        return d
 
 
 @dataclass
@@ -110,6 +124,8 @@ class RenderPayload:
     hot_comment: Optional[Dict[str, Any]] = None
     comments: List[Dict[str, Any]] = field(default_factory=list)
     platform_color: str = "#fb7299"
+    bot_name: str = "AstrBot"
+    """Bot名称（如"守岸人"、"薇尔莉特"），用于页脚显示"""
     card_width: str = "1440px"
     font_scale: float = 1.0
     """字体缩放因子（1.0=基准，>1=放大）"""
@@ -152,6 +168,7 @@ class RenderPayload:
             hot_comment=raw.get("hot_comment"),
             comments=raw.get("comments", []),
             platform_color=str(raw.get("platform_color", "#fb7299")),
+            bot_name=str(raw.get("bot_name", "AstrBot") or "AstrBot"),
             card_width=str(raw.get("card_width", "1440px")),
             font_scale=float(raw.get("font_scale", 1.0) or 1.0),
             timestamp=str(raw.get("timestamp", "") or ""),
@@ -179,6 +196,7 @@ class RenderPayload:
             "follower_count": self.follower_count,
             "stats": self.stats,
             "platform_color": self.platform_color,
+            "bot_name": self.bot_name,
             "card_width": self.card_width,
             "font_scale": self.font_scale,
             "timestamp": self.timestamp,
@@ -214,6 +232,10 @@ class RenderPayload:
             summary=self.summary,
             uid=self.uid,
             banner=self.banner,
+            signature=self.signature,
+            follower_count=self.follower_count,
+            timestamp=self.timestamp,
+            stats=dict(self.stats) if self.stats else {},
         )
 
 

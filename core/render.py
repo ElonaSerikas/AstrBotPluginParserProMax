@@ -473,6 +473,9 @@ class Renderer:
         # 平台颜色（每次渲染时根据 result.platform 更新）
         self._platform_color_hex: str = "#fb7299"
         self._platform_color_rgb: tuple[int, int, int] = _hex_to_rgb("#fb7299")
+        # Bot名称（用于页脚显示）
+        _bot_name = getattr(config, "bot_name", None) or (star.name if star and hasattr(star, 'name') else None) or "AstrBot"
+        self.FOOTER_BADGE = f"{_bot_name} · Parser"
 
     @property
     def fontset(self) -> FontSet:
@@ -731,6 +734,7 @@ class Renderer:
                 payload = parse_result_to_render_payload(
                     result,
                     card_width=getattr(self.cfg, "card_width", "1440px"),
+                    bot_name=getattr(self.cfg, "bot_name", None) or (self.star.name if self.star and hasattr(self.star, 'name') else None) or "AstrBot",
                 )
                 logger.debug(f"[渲染] HTML payload: name={payload.name!r}, title={payload.title!r}, signature={payload.signature!r}, timestamp={payload.timestamp!r}, stats={payload.stats}, pinned_comment={payload.pinned_comment is not None}, images={len(payload.image_urls)}")
                 # 下载远程图片为 data URI，绕过防盗链

@@ -10,7 +10,7 @@ from msgspec import convert
 from astrbot.api import logger
 
 from ...config import PluginConfig
-from ...data import Comment, ImageContent, MediaContent, Platform
+from ...data import Comment, ImageContent, MediaContent, Platform, SendGroup
 from ...exception import DownloadException, DurationLimitException
 from ..base import (
     BaseParser,
@@ -60,6 +60,67 @@ class BilibiliParser(BaseParser):
         except Exception as e:
             logger.debug(f"[B站] 获取粉丝数失败(mid={mid}): {e}")
             return None
+
+    async def _get_user_sign(self, mid: int) -> str | None:
+        """获取用户签名/简介（失败返回 None，不影响主流程）"""
+        try:
+            from bilibili_api import user as bili_user
+            u = bili_user.User(mid, credential=self.login._credential)
+            info = await u.get_user_info()
+            return info.get("sign") or None
+        except Exception as e:
+            logger.debug(f"[B站] 获取用户签名失败(mid={mid}): {e}")
+            return None
+
+    async def _get_user_extra_info(self, mid: int) -> dict:
+        """获取用户扩展信息（粉丝数、签名、认证、关注数、获赞数）
+
+        Returns:
+            dict: {
+                "follower_count": int | None,
+                "sign": str | None,
+                "official_title": str,
+                "official_role": int,
+                "following": int,
+                "like_num": int,
+            }
+        """
+        result = {
+            "follower_count": None,
+            "sign": None,
+            "official_title": "",
+            "official_role": 0,
+            "following": 0,
+            "like_num": 0,
+            "total_views": 0,
+        }
+        try:
+            from bilibili_api import user as bili_user
+            u = bili_user.User(mid, credential=self.login._credential)
+            # 并发获取用户信息和关系信息
+            user_info, relation_info = await asyncio.gather(
+                u.get_user_info(),
+                u.get_relation_info(),
+                return_exceptions=True,
+            )
+            if not isinstance(user_info, Exception):
+                result["sign"] = user_info.get("sign") or None
+                official = user_info.get("official", {})
+                result["official_title"] = official.get("title", "")
+                result["official_role"] = official.get("role", 0)
+            if not isinstance(relation_info, Exception):
+                result["follower_count"] = relation_info.get("follower", 0)
+                result["following"] = relation_info.get("following", 0)
+            # 获取获赞数和总播放量
+            try:
+                up_stat = await u.get_up_stat()
+                result["like_num"] = up_stat.get("likes", 0)
+                result["total_views"] = up_stat.get("archive", {}).get("view", 0) if isinstance(up_stat.get("archive"), dict) else 0
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug(f"[B站] 获取用户扩展信息失败(mid={mid}): {e}")
+        return result
 
     async def _get_pinned_comment(self, avid: int, type_: "CommentResourceType | None" = None) -> tuple[Comment | None, Comment | None]:
         """获取置顶评论和热评，返回 (pinned, hot)。失败返回 (None, None)"""
@@ -149,6 +210,12 @@ class BilibiliParser(BaseParser):
         avid = int(searched.group("avid"))
         return await self.parse_video(avid=avid)
 
+    @handle("/festival/", r"bilibili\.com/festival/[^?]+\?.*bvid=(?P<bvid>BV[0-9a-zA-Z]{10})")
+    async def _parse_festival(self, searched: Match[str]):
+        """解析活动页面链接（提取 bvid 参数作为视频解析）"""
+        bvid = str(searched.group("bvid"))
+        return await self.parse_video(bvid=bvid)
+
     @handle("av", r"^av(?P<avid>\d{6,})(?:\s)?(?P<page_num>\d{1,3})?$")
     @handle(
         "/av",
@@ -228,10 +295,29 @@ class BilibiliParser(BaseParser):
             up_avatar = up_info.get("avatar", "")
             up_mid = up_info.get("mid", "")
 
+            # 并发获取UP主扩展信息 和 置顶评论/热评
+            user_extra, pinned_comment, hot_comment = {}, None, None
+            aux_tasks = []
+            if up_mid:
+                aux_tasks.append(self._get_user_extra_info(up_mid))
+            from bilibili_api.comment import CommentResourceType as _CRT
+            aux_tasks.append(self._get_pinned_comment(ep_id, type_=_CRT.BANGUMI))
+            if aux_tasks:
+                aux_results = await asyncio.gather(*aux_tasks, return_exceptions=True)
+                for r in aux_results:
+                    if isinstance(r, Exception):
+                        logger.debug(f"[B站番剧] 辅助 API 调用失败: {r}")
+                    elif isinstance(r, dict):
+                        user_extra = r
+                    elif isinstance(r, tuple) and len(r) == 2:
+                        pinned_comment, hot_comment = r
+
             author = self.create_author(
                 up_name or "bilibili",
                 avatar=up_avatar or None,
                 uid=str(up_mid) if up_mid else None,
+                description=user_extra.get("sign"),
+                follower_count=user_extra.get("follower_count"),
             )
 
             contents = []
@@ -249,6 +335,19 @@ class BilibiliParser(BaseParser):
                 stats["likes"] = stat["likes"]
             if stat.get("coins"):
                 stats["coins"] = stat["coins"]
+            if stat.get("danmaku"):
+                stats["danmaku"] = stat["danmaku"]
+            if stat.get("reply"):
+                stats["comments"] = stat["reply"]
+            if stat.get("share"):
+                stats["reposts"] = stat["share"]
+            # UP主扩展信息
+            if user_extra.get("following"):
+                stats["following"] = user_extra["following"]
+            if user_extra.get("like_num"):
+                stats["user_likes"] = user_extra["like_num"]
+            if user_extra.get("total_views"):
+                stats["total_views"] = user_extra["total_views"]
 
             display_title = f"{season_title}"
             if ep_title:
@@ -262,11 +361,16 @@ class BilibiliParser(BaseParser):
                 contents=contents,
                 timestamp=timestamp,
                 stats=stats or None,
+                pinned_comment=pinned_comment,
+                hot_comment=hot_comment,
                 extra={
                     "ep_id": ep_id,
                     "season_id": season_info.get("season_id", ""),
                     "type": "bangumi",
+                    "handle": f"ep{ep_id}",
                     "post_id": str(ep_id),
+                    "uid": str(up_mid) if up_mid else "",
+                    "official_title": user_extra.get("official_title", ""),
                 },
                 page_type="bangumi",
             )
@@ -282,7 +386,7 @@ class BilibiliParser(BaseParser):
         season_id = int(searched.group("season_id"))
         url = searched.group(0)
         try:
-            bangumi = Bangumi(season_id=season_id, credential=self.login._credential)
+            bangumi = Bangumi(ssid=season_id, credential=self.login._credential)
             detail = await bangumi.get_meta()
 
             season_title = detail.get("title", "")
@@ -295,10 +399,17 @@ class BilibiliParser(BaseParser):
             up_avatar = up_info.get("avatar", "")
             up_mid = up_info.get("mid", "")
 
+            # 获取UP主扩展信息
+            user_extra = {}
+            if up_mid:
+                user_extra = await self._get_user_extra_info(up_mid)
+
             author = self.create_author(
                 up_name or "bilibili",
                 avatar=up_avatar or None,
                 uid=str(up_mid) if up_mid else None,
+                description=user_extra.get("sign"),
+                follower_count=user_extra.get("follower_count"),
             )
 
             contents = []
@@ -314,6 +425,15 @@ class BilibiliParser(BaseParser):
                 stats["favorites"] = stat["favorites"]
             if stat.get("likes"):
                 stats["likes"] = stat["likes"]
+            if stat.get("danmaku"):
+                stats["danmaku"] = stat["danmaku"]
+            # UP主扩展信息
+            if user_extra.get("following"):
+                stats["following"] = user_extra["following"]
+            if user_extra.get("like_num"):
+                stats["user_likes"] = user_extra["like_num"]
+            if user_extra.get("total_views"):
+                stats["total_views"] = user_extra["total_views"]
 
             return self.result(
                 title=season_title,
@@ -325,7 +445,10 @@ class BilibiliParser(BaseParser):
                 extra={
                     "season_id": season_id,
                     "type": "bangumi_season",
+                    "handle": f"ss{season_id}",
                     "post_id": str(season_id),
+                    "uid": str(up_mid) if up_mid else "",
+                    "official_title": user_extra.get("official_title", ""),
                 },
                 page_type="bangumi_season",
             )
@@ -363,13 +486,6 @@ class BilibiliParser(BaseParser):
         video_info = convert(raw_info, VideoInfo)
         # 获取简介
         text = f"简介: {video_info.desc}" if video_info.desc else None
-        # up
-        author = self.create_author(
-            video_info.owner.name,
-            video_info.owner.face,
-            uid=str(video_info.owner.mid) if hasattr(video_info.owner, 'mid') else None,
-            description=getattr(video_info.owner, 'sign', None) or None,
-        )
         # 处理分 p
         page_info = video_info.extract_info_with_page(page_num)
 
@@ -435,11 +551,12 @@ class BilibiliParser(BaseParser):
             "reposts": video_info.stat.share or 0,
         }
 
-        # 并发获取粉丝数和置顶评论（非阻塞，失败不影响主流程）
-        follower_count, pinned_comment, hot_comment = None, None, None
+        # 并发获取用户扩展信息和置顶评论（非阻塞，失败不影响主流程）
+        user_extra, pinned_comment, hot_comment = {}, None, None
         tasks = []
-        if video_info.owner.mid:
-            tasks.append(self._get_follower_count(video_info.owner.mid))
+        mid = video_info.owner.mid
+        if mid:
+            tasks.append(self._get_user_extra_info(mid))
         video_aid = getattr(video_info, 'aid', None) or getattr(video_info, 'bvid', None)
         if video_aid:
             tasks.append(self._get_pinned_comment(video_aid))
@@ -448,12 +565,39 @@ class BilibiliParser(BaseParser):
             for r in results:
                 if isinstance(r, Exception):
                     logger.debug(f"[B站] 辅助 API 调用失败: {r}")
-                elif isinstance(r, int):
-                    follower_count = r
+                elif isinstance(r, dict):
+                    user_extra = r
                 elif isinstance(r, tuple) and len(r) == 2:
                     pinned_comment, hot_comment = r
-        if follower_count is not None:
-            author.follower_count = follower_count
+
+        # 添加用户扩展信息到 stats
+        if user_extra.get("following"):
+            stats["following"] = user_extra["following"]
+        if user_extra.get("like_num"):
+            stats["user_likes"] = user_extra["like_num"]
+        if user_extra.get("total_views"):
+            stats["total_views"] = user_extra["total_views"]
+
+        # 创建作者
+        author = self.create_author(
+            video_info.owner.name,
+            video_info.owner.face,
+            uid=str(mid) if mid else None,
+            description=user_extra.get("sign"),
+            follower_count=user_extra.get("follower_count"),
+        )
+
+        extra = {
+            "uid": str(mid), "info": ai_summary,
+            "handle": f"av{getattr(video_info, 'aid', '')}", "bvid": video_info.bvid, "post_id": video_info.bvid,
+        }
+        if user_extra.get("official_title"):
+            extra["official_title"] = user_extra["official_title"]
+
+        # 提取视频头衔/徽章（如"每周必看"、"排行榜"、"入站必刷"）
+        badge_text = self._extract_video_badge(video_info)
+        if badge_text:
+            extra["video_badge"] = badge_text
 
         return self.result(
             url=url,
@@ -462,12 +606,42 @@ class BilibiliParser(BaseParser):
             text=text,
             author=author,
             contents=[video_content],
-            extra={"uid": str(video_info.owner.mid), "info": ai_summary, "handle": f"av{getattr(video_info, 'aid', '')}", "bvid": video_info.bvid, "post_id": video_info.bvid},
+            extra=extra,
             page_type="video",
             stats=stats,
             pinned_comment=pinned_comment,
             hot_comment=hot_comment,
         )
+
+    def _extract_video_badge(self, video_info) -> str:
+        """提取视频头衔/徽章文本"""
+        # 尝试从 badge 字段提取
+        badge = getattr(video_info, 'badge', None)
+        if badge:
+            if isinstance(badge, dict):
+                text = badge.get("text", "")
+                if text:
+                    return text
+            elif isinstance(badge, str):
+                return badge
+        # 尝试从 honor 字段提取
+        honor = getattr(video_info, 'honor', None)
+        if honor and isinstance(honor, dict):
+            honor_reply = honor.get("honor_reply", {})
+            honor_icon = honor_reply.get("honor_icon", {})
+            text = honor_icon.get("text", "")
+            if text:
+                return text
+        # 尝试从 label 字段提取
+        label = getattr(video_info, 'label', None)
+        if label:
+            if isinstance(label, dict):
+                text = label.get("text", "")
+                if text:
+                    return text
+            elif isinstance(label, str):
+                return label
+        return ""
 
     async def parse_dynamic(self, dynamic_id: int, url: str = ""):
         """解析动态信息
@@ -497,11 +671,11 @@ class BilibiliParser(BaseParser):
             description=dynamic_info.modules.module_author.sign or None,
         )
 
-        # 并发获取粉丝数和置顶评论（非阻塞，失败不影响主流程）
-        follower_count, pinned_comment, hot_comment = None, None, None
+        # 并发获取用户扩展信息和置顶评论（非阻塞，失败不影响主流程）
+        user_extra, pinned_comment, hot_comment = {}, None, None
         aux_tasks = []
         if mid:
-            aux_tasks.append(self._get_follower_count(mid))
+            aux_tasks.append(self._get_user_extra_info(mid))
         # 动态评论 oid = dynamic_id
         from bilibili_api.comment import CommentResourceType as _CRT
         aux_tasks.append(self._get_pinned_comment(dynamic_id, type_=_CRT.DYNAMIC))
@@ -510,12 +684,12 @@ class BilibiliParser(BaseParser):
             for r in aux_results:
                 if isinstance(r, Exception):
                     logger.debug(f"[B站动态] 辅助 API 调用失败: {r}")
-                elif isinstance(r, int):
-                    follower_count = r
+                elif isinstance(r, dict):
+                    user_extra = r
                 elif isinstance(r, tuple) and len(r) == 2:
                     pinned_comment, hot_comment = r
-        if follower_count is not None:
-            author.follower_count = follower_count
+        if user_extra.get("follower_count") is not None:
+            author.follower_count = user_extra["follower_count"]
 
         # 下载图片
         contents: list[MediaContent] = []
@@ -554,14 +728,14 @@ class BilibiliParser(BaseParser):
             except Exception as e:
                 logger.warning(f"[B站动态] 获取转发内容媒体失败: {e}")
 
-            # 原动态作者信息
+            # 原动态作者信息（使用 _get_user_extra_info 获取完整信息）
             orig_mid = orig.modules.module_author.mid
-            orig_follower = await self._get_follower_count(orig_mid) if orig_mid else None
+            orig_user_extra = await self._get_user_extra_info(orig_mid) if orig_mid else {}
             orig_author = self.create_author(
                 orig.name, orig.avatar,
                 uid=str(orig_mid),
-                description=orig.modules.module_author.sign or None,
-                follower_count=orig_follower,
+                description=orig_user_extra.get("sign") or orig.modules.module_author.sign or None,
+                follower_count=orig_user_extra.get("follower_count"),
             )
 
             # 原动态统计数据
@@ -583,6 +757,16 @@ class BilibiliParser(BaseParser):
                     if count:
                         orig_stats[stat_key] = int(count)
 
+            # 原动态置顶评论和热评
+            orig_pinned, orig_hot = None, None
+            try:
+                from bilibili_api.comment import CommentResourceType as _CRT2
+                orig_pinned, orig_hot = await self._get_pinned_comment(
+                    int(orig.id_str), type_=_CRT2.DYNAMIC
+                )
+            except Exception as e:
+                logger.debug(f"[B站动态] 获取原动态评论失败: {e}")
+
             # 尝试从 module_dynamic 直接提取文本（防止属性访问静默返回 None）
             orig_text = orig.text
             orig_title = orig.title
@@ -590,6 +774,11 @@ class BilibiliParser(BaseParser):
                 # 回退：直接从 raw dict 提取
                 orig_text = orig.modules.module_dynamic.get("desc", {}).get("text") if isinstance(orig.modules.module_dynamic.get("desc"), dict) else None
             logger.debug(f"[B站动态] orig_title={orig_title}, orig_text={orig_text}, orig_contents={len(orig_contents)}")
+
+            # 原动态专属ID
+            orig_type = orig.type if hasattr(orig, 'type') else ""
+            orig_handle = f"opus/{orig.id_str}" if "OPUS" in str(orig_type).upper() else f"t{orig.id_str}"
+
             repost = self.result(
                 title=orig_title,
                 text=orig_text,
@@ -598,6 +787,10 @@ class BilibiliParser(BaseParser):
                 timestamp=orig.timestamp,
                 url=f"https://www.bilibili.com/dynamic/{orig.id_str}",
                 stats=orig_stats or None,
+                pinned_comment=orig_pinned,
+                hot_comment=orig_hot,
+                extra={"uid": str(orig_mid), "handle": orig_handle, "post_id": orig.id_str},
+                page_type="dynamic",
             )
 
         # 提取统计数据
@@ -620,6 +813,13 @@ class BilibiliParser(BaseParser):
                     continue
                 if count:
                     stats[stat_key] = int(count)
+        # 添加用户扩展信息到 stats
+        if user_extra.get("following"):
+            stats["following"] = user_extra["following"]
+        if user_extra.get("like_num"):
+            stats["user_likes"] = user_extra["like_num"]
+        if user_extra.get("total_views"):
+            stats["total_views"] = user_extra["total_views"]
 
         # 专属ID: 动态用 t{id}，图文用 opus/{id}
         dyn_type = dynamic_info.type if hasattr(dynamic_info, 'type') else ""
@@ -627,6 +827,10 @@ class BilibiliParser(BaseParser):
             handle = f"opus/{dynamic_id}"
         else:
             handle = f"t{dynamic_id}"
+
+        extra = {"uid": str(mid), "handle": handle, "post_id": str(dynamic_id)}
+        if user_extra.get("official_title"):
+            extra["official_title"] = user_extra["official_title"]
 
         return self.result(
             title=dynamic_info.title,
@@ -639,7 +843,7 @@ class BilibiliParser(BaseParser):
             stats=stats or None,
             pinned_comment=pinned_comment,
             hot_comment=hot_comment,
-            extra={"uid": str(mid), "handle": handle, "post_id": str(dynamic_id)},
+            extra=extra,
             page_type="dynamic",
         )
 
@@ -689,11 +893,11 @@ class BilibiliParser(BaseParser):
                 mid = module.module_author.mid
                 break
 
-        # 并发获取粉丝数和置顶评论
-        follower_count, pinned_comment, hot_comment = None, None, None
+        # 并发获取用户扩展信息和置顶评论
+        user_extra, pinned_comment, hot_comment = {}, None, None
         aux_tasks = []
         if mid:
-            aux_tasks.append(self._get_follower_count(mid))
+            aux_tasks.append(self._get_user_extra_info(mid))
         if opus_id:
             from bilibili_api.comment import CommentResourceType as _CRT
             aux_tasks.append(self._get_pinned_comment(opus_id, type_=comment_type or _CRT.DYNAMIC))
@@ -702,38 +906,41 @@ class BilibiliParser(BaseParser):
             for r in aux_results:
                 if isinstance(r, Exception):
                     logger.debug(f"[B站图文] 辅助 API 调用失败: {r}")
-                elif isinstance(r, int):
-                    follower_count = r
+                elif isinstance(r, dict):
+                    user_extra = r
                 elif isinstance(r, tuple) and len(r) == 2:
                     pinned_comment, hot_comment = r
 
         author = self.create_author(
             *opus_data.name_avatar,
             uid=str(getattr(opus_data, 'uid', None) or getattr(opus_data, 'mid', None) or ''),
-            description=getattr(opus_data, 'author_sign', None) or None,
-            follower_count=follower_count,
+            description=user_extra.get("sign") or getattr(opus_data, 'author_sign', None) or None,
+            follower_count=user_extra.get("follower_count"),
         )
-        # 按顺序处理图文内容（参考 parse_read 的逻辑）
+        # 按顺序处理图文内容：文本和图片分开处理
         contents: list[MediaContent] = []
         first_image_url = None
-        current_text = ""
+        text_parts: list[str] = []
         for node in opus_data.gen_text_img():
             if isinstance(node, ImageNode):
                 if first_image_url is None:
                     first_image_url = node.url
-                contents.append(
-                    self.create_graphics_content(
-                        node.url, current_text.strip(), node.alt
-                    )
+                # 图片作为 ImageContent 添加（模板通过 image_urls 渲染）
+                img_task = self.downloader.download_img(
+                    node.url, headers=self.headers, proxy=self.proxy
                 )
-                current_text = ""
+                contents.append(ImageContent(img_task, source_url=node.url))
             elif isinstance(node, TextNode):
-                current_text += node.text
+                text_parts.append(node.text)
+        # 所有文本合并为 result.text（模板通过 {{ text }} 渲染）
+        current_text = "".join(text_parts).strip()
 
         # 图文封面图: 用第一张图片
         extra: dict = {"uid": str(mid or ''), "handle": f"opus/{opus_id}", "post_id": str(opus_id)} if opus_id else {"uid": str(mid or '')}
         if first_image_url:
             extra["cover_url"] = first_image_url
+        if user_extra.get("official_title"):
+            extra["official_title"] = user_extra["official_title"]
 
         # 提取统计数据
         stats: dict[str, int] = {}
@@ -751,6 +958,13 @@ class BilibiliParser(BaseParser):
                 if stat_data.coin:
                     stats["coins"] = stat_data.coin.get("count", 0)
                 break
+        # 添加用户扩展信息到 stats
+        if user_extra.get("following"):
+            stats["following"] = user_extra["following"]
+        if user_extra.get("like_num"):
+            stats["user_likes"] = user_extra["like_num"]
+        if user_extra.get("total_views"):
+            stats["total_views"] = user_extra["total_views"]
 
         return self.result(
             title=opus_data.title,
@@ -765,6 +979,41 @@ class BilibiliParser(BaseParser):
             extra=extra,
             page_type="opus",
         )
+
+    async def _get_live_extra_stats(self, room) -> dict:
+        """并发获取直播间额外统计数据（高能榜、大航海），失败返回空 dict"""
+        result: dict = {}
+        tasks = {
+            "gaonengbang": room.get_gaonengbang(page=1),
+            "dahanghai": room.get_dahanghai(page=1),
+        }
+        done = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        for key, val in zip(tasks.keys(), done):
+            if isinstance(val, Exception):
+                logger.debug(f"[B站直播] 获取{key}失败: {val}")
+                continue
+            if key == "gaonengbang" and isinstance(val, dict):
+                result["high_energy_users"] = val.get("onlineNum", 0)
+                # 高能榜排名列表（前3名）
+                rank_items = val.get("OnlineRankItem", [])
+                if rank_items:
+                    result["top3_rank"] = [
+                        {"name": item.get("name", ""), "score": item.get("score", 0)}
+                        for item in rank_items[:3]
+                    ]
+            elif key == "dahanghai" and isinstance(val, dict):
+                info = val.get("info", {})
+                result["fleet_total"] = info.get("num", 0)
+                # 统计各等级舰长数
+                guard_counts = {1: 0, 2: 0, 3: 0}  # 1=总督, 2=提督, 3=舰长
+                for member in val.get("list", []):
+                    level = member.get("guard_level", 0)
+                    if level in guard_counts:
+                        guard_counts[level] += 1
+                result["governor"] = guard_counts[1]   # 总督
+                result["admiral"] = guard_counts[2]     # 提督
+                result["captain"] = guard_counts[3]     # 舰长
+        return result
 
     async def parse_live(self, room_id: int):
         """解析直播信息
@@ -788,7 +1037,6 @@ class BilibiliParser(BaseParser):
             logger.warning(f"[B站直播] 数据转换失败(room={room_id}): {e}")
             # fallback: 直接从 dict 提取关键信息
             room_info = info_dict.get("room_info", {})
-            anchor_info = info_dict.get("anchor_info", {})
             return self.result(
                 url=f"https://live.bilibili.com/{room_id}",
                 title=room_info.get("title", f"直播间 {room_id}"),
@@ -810,32 +1058,72 @@ class BilibiliParser(BaseParser):
             )
             contents.append(ImageContent(keyframe_task, source_url=keyframe))
 
-        # 并发获取主播信息（签名 + 粉丝数）
+        # 从 room_info 和 anchor_info 提取额外数据
+        room_info = info_dict.get("room_info", {})
+        anchor_info = info_dict.get("anchor_info", {})
+        medal_info = anchor_info.get("medal_info", {})
+        live_info = anchor_info.get("live_info", {})
+        relation_info = anchor_info.get("relation_info", {})
+
+        # 并发获取主播扩展信息和额外统计数据
         uid = room_data.uid
-        description, follower_count = None, None
+        user_extra, extra_stats = {}, {}
+        aux_tasks = []
         if uid:
-            try:
-                from bilibili_api import user as bili_user
-                u = bili_user.User(uid, credential=self.login._credential)
-                user_info = await u.get_user_info()
-                description = user_info.get("sign") or None
-            except Exception as e:
-                logger.debug(f"[B站直播] 获取主播信息失败(uid={uid}): {e}")
-            follower_count = await self._get_follower_count(uid)
+            aux_tasks.append(self._get_user_extra_info(uid))
+        aux_tasks.append(self._get_live_extra_stats(room))
+        if aux_tasks:
+            aux_results = await asyncio.gather(*aux_tasks, return_exceptions=True)
+            for r in aux_results:
+                if isinstance(r, Exception):
+                    logger.debug(f"[B站直播] 辅助 API 调用失败: {r}")
+                elif isinstance(r, dict) and "follower_count" in r:
+                    user_extra = r
+                elif isinstance(r, dict):
+                    extra_stats = r
 
         author = self.create_author(
             room_data.name, room_data.avatar,
             uid=str(uid),
-            description=description,
-            follower_count=follower_count,
+            description=user_extra.get("sign"),
+            follower_count=user_extra.get("follower_count"),
         )
 
+        # 构建统计数据
         stats: dict[str, int] = {}
         if room_data.online:
             stats["views"] = room_data.online
+        # 直播间关注数
+        room_attention = room_info.get("attention") or relation_info.get("attention")
+        if room_attention:
+            stats["attention"] = room_attention
+        # 用户扩展信息
+        if user_extra.get("following"):
+            stats["following"] = user_extra["following"]
+        if user_extra.get("like_num"):
+            stats["user_likes"] = user_extra["like_num"]
+        if user_extra.get("total_views"):
+            stats["total_views"] = user_extra["total_views"]
+        # 粉丝团成员数
+        fansclub = medal_info.get("fansclub")
+        if fansclub:
+            stats["fansclub"] = fansclub
+        # 高能榜数据
+        if extra_stats.get("high_energy_users"):
+            stats["high_energy_users"] = extra_stats["high_energy_users"]
+        # 大航海数据
+        if extra_stats.get("fleet_total"):
+            stats["fleet_total"] = extra_stats["fleet_total"]
+        if extra_stats.get("governor"):
+            stats["governor"] = extra_stats["governor"]
+        if extra_stats.get("admiral"):
+            stats["admiral"] = extra_stats["admiral"]
+        if extra_stats.get("captain"):
+            stats["captain"] = extra_stats["captain"]
 
         # 直播状态判断
-        is_living = room_data.live_time and room_data.live_time > 0
+        live_start_time = room_info.get("live_start_time", 0)
+        is_living = bool(live_start_time and live_start_time > 0)
         live_status = "🔴 直播中" if is_living else "⚫ 未开播"
 
         # 尝试获取回放信息（仅在未开播时）
@@ -850,11 +1138,40 @@ class BilibiliParser(BaseParser):
             except Exception:
                 pass
 
+        # 直播间简介
+        room_desc = room_info.get("description", "") or room_info.get("desc", "")
+
         detail_text = room_data.detail
+        if room_desc:
+            detail_text = f"简介: {room_desc}\n{detail_text}"
         if not is_living:
             detail_text = f"{live_status}\n{detail_text}"
             if playback_url:
                 detail_text += f"\n回放: {playback_url}"
+
+        # 添加直播专属字段到 stats（模板通过 stats.xxx 渲染）
+        stats["is_living"] = "直播中" if is_living else "未开播"
+        if live_info.get("level"):
+            stats["live_level"] = live_info["level"]
+        if extra_stats.get("top3_rank"):
+            stats["top3_rank"] = ", ".join(
+                f"{r['name']}({r['score']})" for r in extra_stats["top3_rank"][:3]
+            )
+
+        # 构建 extra 字段
+        extra = {
+            "handle": f"live:{room_id}",
+            "uid": str(uid) if uid else "",
+            "is_living": is_living,
+            "post_id": str(room_id),
+            "live_level": live_info.get("level"),
+            "area_id": room_info.get("area_id"),
+            "parent_area_id": room_info.get("parent_area_id"),
+        }
+        if user_extra.get("official_title"):
+            extra["official_title"] = user_extra["official_title"]
+        if extra_stats.get("top3_rank"):
+            extra["top3_rank"] = extra_stats["top3_rank"]
 
         url = f"https://live.bilibili.com/{room_id}"
         return self.result(
@@ -863,110 +1180,462 @@ class BilibiliParser(BaseParser):
             text=detail_text,
             contents=contents,
             author=author,
-            timestamp=room_data.live_time or None,
+            timestamp=live_start_time or None,
             stats=stats or None,
-            extra={"handle": f"live:{room_id}", "uid": str(uid), "is_living": is_living, "post_id": str(room_id)} if uid else {"handle": f"live:{room_id}", "is_living": is_living, "post_id": str(room_id)},
+            extra=extra,
             page_type="live",
         )
 
-    # space.bilibili.com/{mid}、space.bilibili.com/{mid}/dynamic、space.bilibili.com/{mid}/upload/video
-    @handle("space.bilibili.com", r"space\.bilibili\.com/(?P<mid>\d+)(?:/(?:dynamic|upload/video))?(?:\?.*)?$")
+    # space.bilibili.com/{mid}、/dynamic、/upload/video、/upload/opus、/upload/audio、/lists、/lists/{id}、/favlist
+    @handle("space.bilibili.com", r"space\.bilibili\.com/(?P<mid>\d+)(?:/(?P<sub>dynamic|upload/(?:video|opus|audio)|lists(?:/\d+)?|favlist))?(?:\?.*)?$")
     async def _parse_space(self, searched: Match[str]):
-        """解析 B站用户主页"""
+        """解析 B站用户主页（根据子路径分发）"""
         mid = int(searched.group("mid"))
-        return await self.parse_space(mid)
+        sub = searched.group("sub") or ""
+        url = searched.group(0)
+        # 如果是 favlist 子路径，提取 fid 参数并转发给 parse_favlist
+        if sub == "favlist":
+            import re as _re
+            fid_match = _re.search(r'[?&]fid=(\d+)', url)
+            if fid_match:
+                return await self.parse_favlist(int(fid_match.group(1)))
+            # 无 fid 参数，尝试获取用户的收藏夹列表
+            return await self.parse_space(mid, sub="favlist", url=url)
+        return await self.parse_space(mid, sub=sub, url=url)
 
-    async def parse_space(self, mid: int):
-        """解析 B站用户主页信息"""
-        import aiohttp
+    async def _get_space_user_info(self, mid: int) -> dict:
+        """获取用户主页基础信息（UP主认证、粉丝数、关注数、获赞数、签名、头像）"""
+        from bilibili_api import user as bili_user
 
-        # 并发获取用户信息和动态
-        user_url = f"https://api.bilibili.com/x/web-interface/card?mid={mid}&photo=false"
-        dynamic_url = f"https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid={mid}&offset=&timezone_offset=-480"
+        u = bili_user.User(mid, credential=self.login._credential)
+        # 并发获取用户信息和关系信息
+        user_info, relation_info = await asyncio.gather(
+            u.get_user_info(),
+            u.get_relation_info(),
+            return_exceptions=True,
+        )
+        if isinstance(user_info, Exception):
+            raise ParseException(f"B站用户信息获取失败: {user_info}")
 
-        async with aiohttp.ClientSession() as session:
-            user_task = session.get(user_url, headers=self.headers)
-            dynamic_task = session.get(dynamic_url, headers=self.headers)
-            user_resp, dynamic_resp = await asyncio.gather(user_task, dynamic_task)
+        name = user_info.get("name", "")
+        face = user_info.get("face", "")
+        sign = user_info.get("sign", "")
+        official = user_info.get("official", {})
+        official_title = official.get("title", "")
+        official_role = official.get("role", 0)  # 0=无, 1=个人认证, 2=机构认证
 
-            user_data = await user_resp.json()
-            dynamic_data = await dynamic_resp.json()
+        fans = 0
+        following = 0
+        if not isinstance(relation_info, Exception):
+            fans = relation_info.get("follower", 0)
+            following = relation_info.get("following", 0)
 
-        if user_data.get("code") != 0:
-            raise ParseException(f"B站用户信息获取失败: {user_data.get('message', '')}")
+        # 获赞数（需要额外 API）
+        like_num = 0
+        try:
+            up_stat = await u.get_up_stat()
+            like_num = up_stat.get("likes", 0)
+        except Exception:
+            pass
 
-        card = user_data.get("data", {}).get("card", {})
-        name = card.get("name", "")
-        face = card.get("face", "")
-        sign = card.get("sign", "")
-        fans = card.get("fans", 0)
-        mid_str = str(mid)
+        return {
+            "name": name, "face": face, "sign": sign,
+            "fans": fans, "following": following, "like_num": like_num,
+            "official_title": official_title, "official_role": official_role,
+        }
 
-        # 获取粉丝数
-        follower_count = None
-        if fans:
-            follower_count = fans
-
-        # 构建作者
-        author = self.create_author(
-            name, face,
-            uid=mid_str,
-            description=sign or None,
-            follower_count=follower_count,
+    def _build_space_author(self, mid: int, user_data: dict):
+        """从用户数据构建 Author"""
+        return self.create_author(
+            user_data["name"], user_data["face"],
+            uid=str(mid),
+            description=user_data["sign"] or None,
+            follower_count=user_data["fans"] or None,
         )
 
-        # 解析最近动态
-        contents = []
-        items = dynamic_data.get("data", {}).get("items", [])
-        for item in items[:5]:
-            modules = item.get("modules", {})
-            dynamic_author = modules.get("module_author", {})
-            dynamic_desc = modules.get("module_dynamic", {})
-            major = dynamic_desc.get("major", {})
+    def _build_space_extra(self, mid: int, user_data: dict, page_type: str) -> dict:
+        """构建 space 通用 extra 字段"""
+        extra = {
+            "handle": f"UID:{mid}",
+            "uid": str(mid),
+            "page_type": page_type,
+        }
+        if user_data["official_title"]:
+            extra["official_title"] = user_data["official_title"]
+            extra["official_role"] = user_data["official_role"]
+        return extra
 
-            # 动态文本
-            desc_text = dynamic_desc.get("desc", {}).get("text", "")
-            if desc_text:
-                from ..data import TextContent
-                contents.append(TextContent(desc_text[:200]))
-
-            # 动态图片
-            draw = major.get("draw", {})
-            if draw:
-                imgs = draw.get("items", [])
-                for img in imgs[:3]:
-                    img_url = img.get("src", "")
-                    if img_url:
-                        contents.extend(self.create_image_contents([img_url]))
-
-            # 动态视频
-            archive = major.get("archive", {})
-            if archive:
-                cover = archive.get("cover", "")
-                if cover:
-                    contents.extend(self.create_image_contents([cover]))
-
-        # 统计数据
+    def _build_space_stats(self, user_data: dict) -> dict:
+        """构建 space 通用 stats"""
         stats = {}
-        like = user_data.get("data", {}).get("like_num", 0)
-        if like:
-            stats["likes"] = like
+        if user_data["like_num"]:
+            stats["likes"] = user_data["like_num"]
+        if user_data["following"]:
+            stats["following"] = user_data["following"]
+        if user_data["fans"]:
+            stats["followers"] = user_data["fans"]
+        return stats
 
-        # 动态数量
-        dynamic_count = len(items)
+    def _build_space_text(self, user_data: dict, content_summary: str = "") -> str:
+        """构建 space 通用文本摘要"""
+        parts = []
+        if user_data["sign"]:
+            parts.append(user_data["sign"])
+        if user_data["official_title"]:
+            parts.append(f"认证: {user_data['official_title']}")
+        parts.append(f"关注: {user_data['following']} | 粉丝: {user_data['fans']} | 获赞: {user_data['like_num']}")
+        if content_summary:
+            parts.append(content_summary)
+        return "\n".join(parts)
+
+    def _extract_video_from_item(self, item: dict) -> dict | None:
+        """从动态/视频列表项中提取视频信息"""
+        # 动态格式
+        modules = item.get("modules", {})
+        dynamic_desc = modules.get("module_dynamic", {})
+        major = dynamic_desc.get("major", {})
+        archive = major.get("archive", {})
+        if archive:
+            return {
+                "title": archive.get("title", ""),
+                "cover": archive.get("cover", ""),
+                "desc": archive.get("desc", ""),
+                "bvid": archive.get("bvid", ""),
+                "aid": archive.get("aid", ""),
+                "stat": {
+                    "views": archive.get("stat", {}).get("view", 0),
+                    "danmaku": archive.get("stat", {}).get("danmaku", 0),
+                    "likes": archive.get("stat", {}).get("like", 0),
+                    "coins": archive.get("stat", {}).get("coin", 0),
+                    "favorites": archive.get("stat", {}).get("favorite", 0),
+                    "reposts": archive.get("stat", {}).get("share", 0),
+                    "comments": archive.get("stat", {}).get("reply", 0),
+                },
+                "pub_ts": modules.get("module_author", {}).get("pub_ts", 0),
+            }
+        # 视频列表格式（get_videos 返回）
+        if "title" in item and "bvid" in item:
+            stat = item.get("stat", {})
+            return {
+                "title": item.get("title", ""),
+                "cover": item.get("pic", ""),
+                "desc": item.get("description", ""),
+                "bvid": item.get("bvid", ""),
+                "aid": str(item.get("aid", "")),
+                "stat": {
+                    "views": stat.get("view", 0),
+                    "danmaku": stat.get("danmaku", 0),
+                    "likes": stat.get("like", 0),
+                    "coins": stat.get("coin", 0),
+                    "favorites": stat.get("favorite", 0),
+                    "reposts": stat.get("share", 0),
+                    "comments": stat.get("reply", 0),
+                },
+                "pub_ts": item.get("pubdate", 0),
+            }
+        return None
+
+    def _format_video_summary(self, videos: list[dict]) -> str:
+        """格式化视频列表摘要"""
+        if not videos:
+            return ""
+        lines = [f"\n最近 {len(videos)} 个视频:"]
+        for v in videos[:5]:
+            views = v.get("stat", {}).get("views", 0)
+            lines.append(f"· {v['title']} ({views}播放)")
+        return "\n".join(lines)
+
+    async def _fetch_space_videos(self, mid: int, count: int = 5, order: str = "pubdate") -> list[dict]:
+        """获取用户最新/最热视频"""
+        from bilibili_api import user as bili_user
+        try:
+            u = bili_user.User(mid, credential=self.login._credential)
+            vid_order = bili_user.VideoOrder.VIEW if order == "click" else bili_user.VideoOrder.PUBDATE
+            resp = await u.get_videos(ps=count, pn=1, order=vid_order)
+            vlist = resp.get("list", {}).get("vlist", [])
+            return [v for item in vlist if (v := self._extract_video_from_item(item))]
+        except Exception as e:
+            logger.debug(f"[B站空间] 获取视频失败(mid={mid}): {e}")
+            return []
+
+    async def _fetch_space_top_videos(self, mid: int) -> list[dict]:
+        """获取用户置顶/代表作视频"""
+        from bilibili_api import user as bili_user
+        try:
+            u = bili_user.User(mid, credential=self.login._credential)
+            resp = await u.get_top_videos()
+            vlist = resp.get("data", {}).get("top", []) if isinstance(resp.get("data"), dict) else resp.get("data", [])
+            if isinstance(vlist, dict):
+                vlist = vlist.get("top", [])
+            return [v for item in vlist if (v := self._extract_video_from_item(item))]
+        except Exception as e:
+            logger.debug(f"[B站空间] 获取置顶视频失败(mid={mid}): {e}")
+            return []
+
+    async def _fetch_space_dynamics(self, mid: int, count: int = 5) -> tuple[list[dict], dict | None]:
+        """获取用户最新动态，返回 (动态列表, 置顶动态)"""
+        from bilibili_api import user as bili_user
+        try:
+            u = bili_user.User(mid, credential=self.login._credential)
+            resp = await u.get_dynamics_new()
+            items = resp.get("items", [])
+            pinned = None
+            dynamics = []
+            for item in items:
+                modules = item.get("modules", {})
+                # 检查是否置顶
+                if modules.get("module_author", {}).get("is_top", False):
+                    pinned = item
+                else:
+                    dynamics.append(item)
+            return dynamics[:count], pinned
+        except Exception as e:
+            logger.debug(f"[B站空间] 获取动态失败(mid={mid}): {e}")
+            return [], None
+
+    def _extract_dynamic_from_item(self, item: dict) -> dict:
+        """从动态项中提取标准化动态信息"""
+        modules = item.get("modules", {})
+        dynamic_desc = modules.get("module_dynamic", {})
+        major = dynamic_desc.get("major", {})
+        author = modules.get("module_author", {})
+
+        title = ""
+        cover = ""
+        text = dynamic_desc.get("desc", {}).get("text", "")
+        stat = modules.get("module_stat", {})
+
+        # 从 major 提取标题和封面
+        if major.get("type") == "MAJOR_TYPE_ARCHIVE":
+            archive = major.get("archive", {})
+            title = archive.get("title", "")
+            cover = archive.get("cover", "")
+        elif major.get("type") == "MAJOR_TYPE_OPUS":
+            opus = major.get("opus", {})
+            title = opus.get("title", "")
+            pics = opus.get("pics", [])
+            if pics:
+                cover = pics[0].get("url", "")
+            if not text:
+                text = opus.get("summary", {}).get("text", "")
+        elif major.get("type") == "MAJOR_TYPE_DRAW":
+            draw = major.get("draw", {})
+            items = draw.get("items", [])
+            if items:
+                cover = items[0].get("src", "")
+
+        return {
+            "title": title,
+            "cover": cover,
+            "text": text,
+            "pub_ts": author.get("pub_ts", 0),
+            "stat": {
+                "likes": stat.get("like", {}).get("count", 0) if isinstance(stat.get("like"), dict) else stat.get("like", 0),
+                "reposts": stat.get("forward", {}).get("count", 0) if isinstance(stat.get("forward"), dict) else stat.get("forward", 0),
+                "comments": stat.get("comment", {}).get("count", 0) if isinstance(stat.get("comment"), dict) else stat.get("comment", 0),
+            },
+        }
+
+    async def _fetch_space_articles(self, mid: int, count: int = 5) -> list[dict]:
+        """获取用户最新图文专栏"""
+        from bilibili_api import user as bili_user
+        try:
+            u = bili_user.User(mid, credential=self.login._credential)
+            resp = await u.get_articles(ps=count, pn=1)
+            articles = resp.get("articles", [])
+            results = []
+            for a in articles[:count]:
+                results.append({
+                    "title": a.get("title", ""),
+                    "cover": a.get("image_urls", [""])[0] if a.get("image_urls") else "",
+                    "text": a.get("summary", ""),
+                    "pub_ts": a.get("publish_time", 0),
+                    "stat": {
+                        "likes": a.get("stats", {}).get("like", 0),
+                        "favorites": a.get("stats", {}).get("favorite", 0),
+                        "reposts": a.get("stats", {}).get("share", 0),
+                        "comments": a.get("stats", {}).get("reply", 0),
+                    },
+                })
+            return results
+        except Exception as e:
+            logger.debug(f"[B站空间] 获取图文失败(mid={mid}): {e}")
+            return []
+
+    async def _fetch_space_audios(self, mid: int, count: int = 5) -> list[dict]:
+        """获取用户最新音频"""
+        from bilibili_api import user as bili_user
+        try:
+            u = bili_user.User(mid, credential=self.login._credential)
+            resp = await u.get_audios(ps=count, pn=1)
+            songs = resp.get("data", {}).get("songs", []) if isinstance(resp.get("data"), dict) else resp.get("data", [])
+            results = []
+            for s in songs[:count]:
+                results.append({
+                    "title": s.get("title", ""),
+                    "cover": s.get("cover", ""),
+                    "text": s.get("intro", ""),
+                    "pub_ts": s.get("passtime", 0),
+                    "stat": {
+                        "likes": s.get("statistic", {}).get("like", 0) if isinstance(s.get("statistic"), dict) else 0,
+                        "favorites": s.get("statistic", {}).get("collect", 0) if isinstance(s.get("statistic"), dict) else 0,
+                    },
+                })
+            return results
+        except Exception as e:
+            logger.debug(f"[B站空间] 获取音频失败(mid={mid}): {e}")
+            return []
+
+    async def _fetch_channel_videos(self, mid: int, list_id: int, count: int = 5) -> list[dict]:
+        """获取合集/系列中的视频"""
+        from bilibili_api import user as bili_user
+        try:
+            u = bili_user.User(mid, credential=self.login._credential)
+            # 尝试 season
+            try:
+                resp = await u.get_channel_videos_season(sid=list_id, ps=count)
+                vlist = resp.get("archives", [])
+                return [v for item in vlist if (v := self._extract_video_from_item(item))]
+            except Exception:
+                pass
+            # 尝试 series
+            resp = await u.get_channel_videos_series(sid=list_id, ps=count)
+            vlist = resp.get("archives", [])
+            return [v for item in vlist if (v := self._extract_video_from_item(item))]
+        except Exception as e:
+            logger.debug(f"[B站空间] 获取合集视频失败(mid={mid}, list={list_id}): {e}")
+            return []
+
+    async def parse_space(self, mid: int, sub: str = "", url: str = ""):
+        """解析 B站用户主页信息（根据子路径分发到不同处理逻辑）
+
+        Args:
+            mid: 用户ID
+            sub: URL子路径（如 "dynamic"、"upload/video"、"lists/123"）
+            url: 原始URL
+        """
+        from ..data import SendGroup
+
+        # 确定页面类型
+        if "upload/video" in sub:
+            page_type = "video"
+        elif "upload/opus" in sub:
+            page_type = "opus"
+        elif "upload/audio" in sub:
+            page_type = "audio"
+        elif sub.startswith("lists/"):
+            page_type = "list"
+        elif sub == "dynamic":
+            page_type = "dynamic"
+        else:
+            page_type = "main"
+
+        # 获取用户基础信息（所有页面类型共用）
+        user_data = await self._get_space_user_info(mid)
+        author = self._build_space_author(mid, user_data)
+        extra = self._build_space_extra(mid, user_data, page_type)
+        stats = self._build_space_stats(user_data)
+        contents = []
+        content_summary = ""
+
+        # 根据页面类型获取不同内容
+        if page_type == "main":
+            # 主页: 置顶视频 + 播放量最多的5个视频
+            top_videos, hot_videos = await asyncio.gather(
+                self._fetch_space_top_videos(mid),
+                self._fetch_space_videos(mid, count=5, order="click"),
+            )
+            # 合并去重（置顶优先）
+            seen_bvids = set()
+            all_videos = []
+            for v in top_videos:
+                if v["bvid"] not in seen_bvids:
+                    seen_bvids.add(v["bvid"])
+                    all_videos.append(v)
+            for v in hot_videos:
+                if v["bvid"] not in seen_bvids and len(all_videos) < 6:
+                    seen_bvids.add(v["bvid"])
+                    all_videos.append(v)
+            for v in all_videos:
+                if v["cover"]:
+                    contents.append(ImageContent(url=v["cover"]))
+            stats["videos"] = len(all_videos)
+            content_summary = self._format_video_summary(all_videos)
+            extra["video_count"] = len(all_videos)
+
+        elif page_type == "dynamic":
+            # 动态页: 置顶动态 + 最新5个动态
+            dynamics, pinned = await self._fetch_space_dynamics(mid, count=5)
+            if pinned:
+                pinned_info = self._extract_dynamic_from_item(pinned)
+                if pinned_info["cover"]:
+                    contents.append(ImageContent(url=pinned_info["cover"]))
+            for d in dynamics:
+                info = self._extract_dynamic_from_item(d)
+                if info["cover"]:
+                    contents.append(ImageContent(url=info["cover"]))
+            total = len(dynamics) + (1 if pinned else 0)
+            stats["dynamics"] = total
+            content_summary = f"\n最近 {total} 条动态"
+            extra["dynamic_count"] = total
+
+        elif page_type == "video":
+            # 视频页: 最新5个视频
+            videos = await self._fetch_space_videos(mid, count=5)
+            for v in videos:
+                if v["cover"]:
+                    contents.append(ImageContent(url=v["cover"]))
+            stats["videos"] = len(videos)
+            content_summary = self._format_video_summary(videos)
+            extra["video_count"] = len(videos)
+
+        elif page_type == "opus":
+            # 图文专栏页: 最新5个图文
+            articles = await self._fetch_space_articles(mid, count=5)
+            for a in articles:
+                if a["cover"]:
+                    contents.append(ImageContent(url=a["cover"]))
+            stats["articles"] = len(articles)
+            content_summary = f"\n最近 {len(articles)} 篇图文"
+            extra["article_count"] = len(articles)
+
+        elif page_type == "audio":
+            # 音频页: 最新5个音频
+            audios = await self._fetch_space_audios(mid, count=5)
+            for a in audios:
+                if a["cover"]:
+                    contents.append(ImageContent(url=a["cover"]))
+            stats["audios"] = len(audios)
+            content_summary = f"\n最近 {len(audios)} 个音频"
+            extra["audio_count"] = len(audios)
+
+        elif page_type == "list":
+            # 合集页: 合集中最新5个视频
+            list_id = int(sub.split("/")[1]) if "/" in sub else 0
+            videos = await self._fetch_channel_videos(mid, list_id, count=5)
+            for v in videos:
+                if v["cover"]:
+                    contents.append(ImageContent(url=v["cover"]))
+            stats["videos"] = len(videos)
+            content_summary = self._format_video_summary(videos)
+            extra["list_id"] = list_id
+            extra["video_count"] = len(videos)
+
+        # 构建最终结果
+        page_titles = {
+            "main": "的主页", "dynamic": "的动态", "video": "的视频",
+            "opus": "的图文", "audio": "的音频", "list": "的合集",
+        }
 
         return self.result(
-            title=f"{name} 的主页",
-            text=f"{sign}" if sign else f"{name} 的 B站主页",
+            title=f"{user_data['name']} {page_titles.get(page_type, '的主页')}",
+            text=self._build_space_text(user_data, content_summary),
             author=author,
             contents=contents,
-            url=f"https://space.bilibili.com/{mid}",
+            url=url or f"https://space.bilibili.com/{mid}",
             stats=stats or None,
-            extra={
-                "handle": f"UID:{mid}",
-                "uid": mid_str,
-                "dynamic_count": dynamic_count,
-            },
+            extra=extra,
+            send_groups=[SendGroup(render_card=True)],
         )
 
     async def parse_favlist(self, fav_id: int):
@@ -996,20 +1665,32 @@ class BilibiliParser(BaseParser):
         if media_count:
             stats["views"] = media_count
 
-        # 粉丝数
-        follower_count = None
+        # 粉丝数和签名（并发获取）
+        follower_count, user_sign = None, None
         if favdata.info.upper.mid:
-            follower_count = await self._get_follower_count(favdata.info.upper.mid)
+            follower_count, user_sign = await asyncio.gather(
+                self._get_follower_count(favdata.info.upper.mid),
+                self._get_user_sign(favdata.info.upper.mid),
+                return_exceptions=False,
+            )
+
+        # 构建文本摘要
+        text_parts = []
+        if favdata.info.intro:
+            text_parts.append(favdata.info.intro)
+        text_parts.append(f"共 {media_count} 个内容")
+        for fav in favdata.medias[:5]:
+            text_parts.append(f"· {fav.title}")
 
         return self.result(
             title=favdata.title,
-            text=favdata.info.intro or None,
+            text="\n".join(text_parts),
             timestamp=favdata.timestamp,
             url=f"https://space.bilibili.com/{favdata.info.upper.mid}/favlist?fid={fav_id}",
             author=self.create_author(
                 favdata.info.upper.name, favdata.info.upper.face,
                 uid=str(favdata.info.upper.mid),
-                description=favdata.info.upper.sign or None,
+                description=favdata.info.upper.sign or user_sign or None,
                 follower_count=follower_count,
             ),
             contents=[
@@ -1018,6 +1699,7 @@ class BilibiliParser(BaseParser):
             ],
             stats=stats or None,
             extra={"handle": f"fav/{fav_id}", "uid": str(favdata.info.upper.mid)},
+            send_groups=[SendGroup(render_card=True)],
         )
 
     async def _get_video(

@@ -10,9 +10,28 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+test_render.py
+test_*.py
+tests/
 
 # Runtime data
 data/
+cookies/
+*.json
+
+# Media files (except resources/)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mp3
+!core/resources/**/*.png
+!core/resources/**/*.jpg
+!core/resources/**/*.jpeg
+!core/resources/**/*.gif
+!core/resources/**/*.mp4
+!core/resources/**/*.mp3
 
 # IDE
 .vscode/
@@ -29,3 +48,7 @@ venv/
 # OS
 Thumbs.db
 .DS_Store
+
+# Cache
+cache/
+*.cache

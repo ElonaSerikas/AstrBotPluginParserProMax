@@ -272,20 +272,45 @@
             <div class="user-details">
                 <div class="username">{{ name | default('AstrBot') }}</div>
                 <div class="meta-info">
-                    <span class="dynamic-label">
-                        {% if type == "DYNAMIC_TYPE_AV" %}投稿视频
-                        {% elif type == "DYNAMIC_TYPE_Article" %}专栏文章
-                        {% elif type == "DYNAMIC_TYPE_FORWARD" %}转发动态
-                        {% else %}动态更新{% endif %}
-                    </span>
-                    <!-- <span>2小时前</span> -->
+                    <span class="dynamic-label">{{ platform_display | default('哔哩哔哩') }}</span>
+                    {% if uid %}<span class="dynamic-label">UID {{ uid }}</span>{% endif %}
+                    {% if handle %}<span class="dynamic-label">{{ handle }}</span>{% endif %}
+                    {% if bvid %}<span class="dynamic-label" style="background: rgba(0,138,197,0.1); color: #008ac5;">{{ bvid }}</span>{% endif %}
+                    {% if follower_count %}<span style="font-size: 11px; color: #9499a0;">{{ follower_count }} 粉丝</span>{% endif %}
+                    {% if timestamp %}<span style="font-size: 11px; color: #9499a0;">{{ timestamp }}</span>{% endif %}
+                    {% if stats and stats.official_title %}<span class="dynamic-label" style="background: rgba(251,114,153,0.1); color: #fb7299;">{{ stats.official_title }}</span>{% endif %}
+                    {% if stats and stats.video_badge %}<span class="dynamic-label" style="background: rgba(0,138,197,0.1); color: #008ac5;">{{ stats.video_badge }}</span>{% endif %}
                 </div>
+                {% if signature %}
+                <div style="font-size: 12px; color: #9499a0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; margin-top: 2px;">{{ signature }}</div>
+                {% endif %}
             </div>
         </div>
         {% if qrcode %}
         <img src="{{ qrcode }}" class="qrcode" alt="QRCode">
         {% endif %}
     </div>
+
+    <!-- Stats -->
+    {% if stats %}
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 24px; background: #fafafa; border-top: 1px solid #f0f0f0; border-bottom: 1px solid #f0f0f0; font-size: 12px;">
+        {% if stats.views %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.views }}</span> <span style="color: #9499a0;">播放</span></span>{% endif %}
+        {% if stats.danmaku %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.danmaku }}</span> <span style="color: #9499a0;">弹幕</span></span>{% endif %}
+        {% if stats.likes %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.likes }}</span> <span style="color: #9499a0;">赞</span></span>{% endif %}
+        {% if stats.coins %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.coins }}</span> <span style="color: #9499a0;">投币</span></span>{% endif %}
+        {% if stats.favorites %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.favorites }}</span> <span style="color: #9499a0;">收藏</span></span>{% endif %}
+        {% if stats.comments %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.comments }}</span> <span style="color: #9499a0;">评论</span></span>{% endif %}
+        {% if stats.reposts %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.reposts }}</span> <span style="color: #9499a0;">转发</span></span>{% endif %}
+        {% if stats.following %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.following }}</span> <span style="color: #9499a0;">关注</span></span>{% endif %}
+        {% if stats.followers %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.followers }}</span> <span style="color: #9499a0;">粉丝</span></span>{% endif %}
+        {% if stats.user_likes %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.user_likes }}</span> <span style="color: #9499a0;">获赞</span></span>{% endif %}
+        {% if stats.high_energy_users %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.high_energy_users }}</span> <span style="color: #9499a0;">高能</span></span>{% endif %}
+        {% if stats.fleet_total %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.fleet_total }}</span> <span style="color: #9499a0;">大航海</span></span>{% endif %}
+        {% if stats.governor %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.governor }}</span> <span style="color: #9499a0;">总督</span></span>{% endif %}
+        {% if stats.admiral %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.admiral }}</span> <span style="color: #9499a0;">提督</span></span>{% endif %}
+        {% if stats.captain %}<span><span style="font-weight: 600; color: #18191c;">{{ stats.captain }}</span> <span style="color: #9499a0;">舰长</span></span>{% endif %}
+    </div>
+    {% endif %}
 
     <!-- Content -->
     <div class="card-content">
@@ -333,10 +358,34 @@
         {% endif %}
     </div>
 
+    <!-- Comments -->
+    {% if pinned_comment or hot_comment %}
+    <div style="padding: 10px 18px; background: #fafafa; border-top: 1px solid #f0f0f0;">
+        {% if pinned_comment %}
+        <div style="padding: 6px 10px; background: #fff; border-radius: 6px; margin-bottom: 6px; border: 1px solid #f0f0f0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--primary-color);">📌 {{ pinned_comment.author }}</span>
+                {% if pinned_comment.likes %}<span style="font-size: 11px; color: #9499a0;">{{ pinned_comment.likes }} 赞</span>{% endif %}
+            </div>
+            <div style="font-size: 12px; color: #444; line-height: 1.4;">{{ pinned_comment.content }}</div>
+        </div>
+        {% endif %}
+        {% if hot_comment %}
+        <div style="padding: 6px 10px; background: #fff; border-radius: 6px; border: 1px solid #f0f0f0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--primary-color);">🔥 {{ hot_comment.author }}</span>
+                {% if hot_comment.likes %}<span style="font-size: 11px; color: #9499a0;">{{ hot_comment.likes }} 赞</span>{% endif %}
+            </div>
+            <div style="font-size: 12px; color: #444; line-height: 1.4;">{{ hot_comment.content }}</div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <!-- Footer -->
     <div class="card-footer">
-        <span class="footer-info">card designed by @ocetars</span>
-        <span class="source-tag">Powerd by astrbot_plugin_bilibili</span>
+        <span class="footer-info">{{ platform_display | default('哔哩哔哩') }} · {{ bot_name | default('AstrBot') }}</span>
+        <span class="source-tag">✦ Parser</span>
     </div>
 </div>
 

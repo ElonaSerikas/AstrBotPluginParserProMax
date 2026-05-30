@@ -24,15 +24,31 @@ def _clean_xhs_image_url(url: str) -> str:
     return clean
 
 
-def _parse_fans_count(fans: str) -> int | str | None:
-    """解析粉丝数：纯数字转 int，'1.2万' 等原样返回字符串"""
+def _parse_fans_count(fans: str) -> int | None:
+    """解析粉丝数：统一返回整数"""
     if not fans:
         return None
     fans = fans.strip()
+    if not fans:
+        return None
+
+    # 纯数字
     if fans.isdigit():
         return int(fans)
-    # 非纯数字（如 "1.2万"）直接返回原字符串
-    return fans if fans else None
+
+    # 带单位的字符串：1.2万、12.3w、1亿
+    match = re.match(r'^([\d.]+)\s*(万|w|W|亿)$', fans)
+    if match:
+        num = float(match.group(1))
+        unit = match.group(2)
+        if unit in ('万', 'w', 'W'):
+            return int(num * 10000)
+        elif unit == '亿':
+            return int(num * 100000000)
+
+    # 无法解析，记录日志并返回 None
+    logger.debug(f"[小红书] 无法解析粉丝数: {fans}")
+    return None
 
 
 class XHSParser(BaseParser):
@@ -100,19 +116,66 @@ class XHSParser(BaseParser):
 
         json_obj = self._extract_initial_state_json(html)
 
-        # 提取用户信息
-        user_data = json_obj.get("user", {}).get("userPageData", {})
-        if not user_data:
-            # 尝试其他路径
-            user_data = json_obj.get("user", {}).get("info", {})
-        if not user_data:
+        # 提取用户信息 - 支持新的 userPageData 结构
+        user_page_data = json_obj.get("user", {}).get("userPageData", {})
+        user_info = json_obj.get("user", {}).get("info", {})
+
+        # 新版结构：basicInfo, verifyInfo, interactions, tags
+        basic_info = user_page_data.get("basicInfo", {})
+        verify_info = user_page_data.get("verifyInfo", {})
+        interactions = user_page_data.get("interactions", [])
+        tags = user_page_data.get("tags", [])
+
+        # 兼容旧版结构
+        if basic_info:
+            nickname = basic_info.get("nickname", "")
+            avatar = basic_info.get("imageb", "") or basic_info.get("images", "")
+            desc = basic_info.get("desc", "")
+            red_id = basic_info.get("redId", "")
+            ip_location = basic_info.get("ipLocation", "")
+        else:
+            # 旧版结构
+            nickname = user_info.get("nickname", "") or user_info.get("nick_name", "")
+            avatar = user_info.get("avatar", "") or user_info.get("imageb", "")
+            desc = user_info.get("desc", "") or user_info.get("description", "")
+            red_id = user_info.get("red_id", "") or user_info.get("redId", "")
+            ip_location = ""
+
+        if not nickname and not user_info:
             raise ParseException("小红书用户信息为空")
 
-        nickname = user_data.get("nickname", "") or user_data.get("nick_name", "")
-        avatar = user_data.get("avatar", "") or user_data.get("imageb", "")
-        desc = user_data.get("desc", "") or user_data.get("description", "")
-        red_id = user_data.get("red_id", "") or user_data.get("redId", "")
-        fans = user_data.get("fans", "") or user_data.get("fansCount", "")
+        # 从 interactions 提取统计数据
+        fans = ""
+        following_count = ""
+        liked_count = ""
+        for item in interactions:
+            item_type = item.get("type", "")
+            count = item.get("count", "")
+            if item_type == "fans":
+                fans = count
+            elif item_type == "follows":
+                following_count = count
+            elif item_type == "interaction":
+                liked_count = count
+
+        # 兼容旧版字段
+        if not fans:
+            fans = user_info.get("fans", "") or user_info.get("fansCount", "")
+        if not following_count:
+            following_count = user_info.get("following_count", "") or user_info.get("followCount", "")
+        if not liked_count:
+            liked_count = user_info.get("liked_count", "") or user_info.get("likedCount", "")
+
+        note_count = user_info.get("note_count", "") or user_info.get("noteCount", "")
+        goods_count = user_info.get("goods_count", "") or user_info.get("goodsCount", "")
+
+        # 提取认证信息 - 从 verifyInfo 获取
+        red_official_verify_type = verify_info.get("redOfficialVerifyType", 0)
+        # 1 = 个人认证, 2 = 企业认证
+        verified = red_official_verify_type > 0
+
+        # 提取博主头衔 - 从 tags 中筛选 tagType="profession" 的标签
+        profession_tags = [tag.get("name", "") for tag in tags if tag.get("tagType") == "profession"]
 
         # 获取用户笔记
         contents = []
@@ -136,17 +199,45 @@ class XHSParser(BaseParser):
             follower_count=_parse_fans_count(fans),
         )
 
+        # 构建统计数据
+        stats = {}
+        if following_count:
+            stats["following"] = _parse_fans_count(following_count)
+        if liked_count:
+            stats["liked"] = _parse_fans_count(liked_count)
+        if note_count:
+            stats["notes"] = _parse_fans_count(note_count)
+        if goods_count:
+            stats["goods"] = _parse_fans_count(goods_count)
+
         extra = {"user_id": user_id}
         if red_id:
             extra["handle"] = f"小红书号 {red_id}"
+        if ip_location:
+            extra["ip_location"] = ip_location
+
+        # 添加认证信息
+        if verified:
+            verify_data = {"verified": True, "type_code": red_official_verify_type}
+            if red_official_verify_type == 2:
+                verify_data["type"] = "enterprise"
+            elif red_official_verify_type == 1:
+                verify_data["type"] = "personal"
+            extra["verify"] = verify_data
+
+        # 添加博主头衔
+        if profession_tags:
+            extra["profession_tags"] = profession_tags
 
         return self.result(
             title=f"{nickname} 的主页",
             text=desc if desc else f"{nickname} 的小红书主页",
             author=author,
             contents=contents,
+            stats=stats or None,
             url=url,
             extra=extra,
+            page_type="user",
         )
 
     # https://www.xiaohongshu.com/discovery/item/68e8e3fa00000000030342ec?app_platform=android&ignoreEngage=true&app_version=9.6.0&share_from_user_hidden=true&xsec_source=app_share&type=normal&xsec_token=CBW9rwIV2qhcCD-JsQAOSHd2tTW9jXAtzqlgVXp6c52Sw%3D&author_share=1&xhsshare=QQ&shareRedId=ODs3RUk5ND42NzUyOTgwNjY3OTo8S0tK&apptime=1761372823&share_id=3b61945239ac403db86bea84a4f15124&share_channel=qq
@@ -363,6 +454,21 @@ class XHSParser(BaseParser):
             follower_count=_parse_fans_count(note_detail.user.fans),
         )
 
+        # 提取平台标签
+        tags = []
+        tag_list = note_data.get("tagList", []) or note_data.get("tags", [])
+        if isinstance(tag_list, list):
+            for tag in tag_list:
+                if isinstance(tag, dict):
+                    tag_name = tag.get("name", "") or tag.get("tagName", "")
+                    if tag_name:
+                        tags.append(tag_name)
+                elif isinstance(tag, str):
+                    tags.append(tag)
+
+        # 提取 IP 属地
+        ip_location = note_data.get("ipLocation", "")
+
         # 平台专属ID（小红书号）— 优先使用 red_id（用户自定义ID），回退到 user_id（内部ID）
         extra = {"note_id": note_id, "post_id": note_id}
         uid = note_detail.user.red_id or note_detail.user.user_id
@@ -370,6 +476,10 @@ class XHSParser(BaseParser):
             extra["handle"] = f"小红书号 {uid}"
         if note_detail.user.user_id:
             extra["uid"] = note_detail.user.user_id
+        if tags:
+            extra["tags"] = tags
+        if ip_location:
+            extra["ip_location"] = ip_location
 
         return self.result(
             title=note_detail.title,
@@ -506,11 +616,30 @@ class XHSParser(BaseParser):
         except Exception:
             pass
 
+        # 提取平台标签
+        tags = []
+        tag_list = note_data.get("tagList", []) or note_data.get("tags", [])
+        if isinstance(tag_list, list):
+            for tag in tag_list:
+                if isinstance(tag, dict):
+                    tag_name = tag.get("name", "") or tag.get("tagName", "")
+                    if tag_name:
+                        tags.append(tag_name)
+                elif isinstance(tag, str):
+                    tags.append(tag)
+
+        # 提取 IP 属地
+        ip_location = note_data.get("ipLocation", "")
+
         # 平台专属ID（小红书号）— 优先使用 redId（用户自定义ID），回退到 userId（内部ID）
         extra = {"note_id": note_id, "post_id": note_id} if note_id else {}
         uid = note_data.user.redId or note_data.user.userId
         if uid:
             extra["handle"] = f"小红书号 {uid}"
+        if tags:
+            extra["tags"] = tags
+        if ip_location:
+            extra["ip_location"] = ip_location
 
         return self.result(
             title=note_data.title,

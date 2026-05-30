@@ -477,6 +477,12 @@ body {
                 {% if signature %}
                 <div class="signature">{{ signature }}</div>
                 {% endif %}
+                {% if stats and stats.official_title %}
+                <div class="signature" style="color: var(--pink); font-weight: 600;">{{ stats.official_title }}</div>
+                {% endif %}
+                {% if stats and stats.video_badge %}
+                <div class="signature" style="color: var(--blue); font-weight: 600;">{{ stats.video_badge }}</div>
+                {% endif %}
                 {% if timestamp %}
                 <div class="publish-time">{{ timestamp }}</div>
                 {% endif %}
@@ -507,6 +513,9 @@ body {
         {% if stats.coins %}<span class="stat-item"><span>{{ stats.coins }}</span> 硬币</span>{% endif %}
         {% if stats.comments %}<span class="stat-item"><span>{{ stats.comments }}</span> 评论</span>{% endif %}
         {% if stats.reposts %}<span class="stat-item"><span>{{ stats.reposts }}</span> 转发</span>{% endif %}
+        {% if stats.following %}<span class="stat-item"><span>{{ stats.following }}</span> 关注</span>{% endif %}
+        {% if stats.followers %}<span class="stat-item"><span>{{ stats.followers }}</span> 粉丝</span>{% endif %}
+        {% if stats.user_likes %}<span class="stat-item"><span>{{ stats.user_likes }}</span> 获赞</span>{% endif %}
         {% if stats.quotes %}<span class="stat-item"><span>{{ stats.quotes }}</span> 引用</span>{% endif %}
         {% if stats.bookmarks %}<span class="stat-item"><span>{{ stats.bookmarks }}</span> 书签</span>{% endif %}
     </div>
@@ -604,7 +613,7 @@ body {
 
     <!-- 页脚 -->
     <div class="footer">
-        <span class="source-badge">AstrBot · Parser</span>
+        <span class="source-badge">{{ platform_display | default('哔哩哔哩') }} · {{ bot_name | default('AstrBot') }}</span>
     </div>
 </div>
 </body>

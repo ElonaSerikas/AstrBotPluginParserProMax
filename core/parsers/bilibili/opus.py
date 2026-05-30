@@ -28,6 +28,7 @@ class Author(Struct):
     mid: int
     pub_time: str
     pub_ts: int
+    sign: str = ""
 
 
 class Image(Struct):
@@ -84,7 +85,7 @@ class Module(Struct):
     module_type: str
     module_author: Author | None = None
     module_content: Content | None = None
-    # module_stat: OpusStat | None = None
+    module_stat: Stat | None = None
 
 
 class Basic(Struct):
@@ -122,6 +123,14 @@ class OpusItem(Struct):
         for module in self.item.modules:
             if module.module_type == "MODULE_TYPE_AUTHOR" and module.module_author:
                 return module.module_author.pub_ts
+        return None
+
+    @property
+    def author_sign(self) -> str | None:
+        """获取作者签名"""
+        for module in self.item.modules:
+            if module.module_type == "MODULE_TYPE_AUTHOR" and module.module_author:
+                return module.module_author.sign or None
         return None
 
     def gen_text_img(self) -> Generator[TextNode | ImageNode, None, None]:

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from msgspec import Struct
 
@@ -42,11 +43,9 @@ class PageInfo:
     cover: str | None = None
 
 
-class VideoInfo(Struct):
+class VideoInfo(Struct, kw_only=True):
     bvid: str
     """bvid"""
-    aid: int | None = None
-    """av号"""
     title: str
     """标题"""
     desc: str
@@ -61,10 +60,18 @@ class VideoInfo(Struct):
     """公开时间戳"""
     ctime: int
     """创建时间戳"""
+    aid: int | None = None
+    """av号"""
     pic: str | None = None
     """封面图片"""
     pages: list[Page] | None = None
     """分集信息"""
+    badge: Any = None
+    """视频头衔/徽章（如"每周必看"、"排行榜"）"""
+    honor: Any = None
+    """荣誉信息（如"入站必刷"）"""
+    label: Any = None
+    """标签信息"""
 
     @property
     def title_with_part(self) -> str:

@@ -11,6 +11,7 @@ class AuthorInfo(Struct):
     mid: int
     pub_time: str
     pub_ts: int
+    sign: str = ""
     # jump_url: str
     # following: bool = False
     # official_verify: dict[str, Any] | None = None
@@ -66,21 +67,26 @@ class DynamicMajor(Struct):
     type: str
     archive: VideoArchive | None = None
     opus: OpusContent | None = None
+    live: dict[str, Any] | None = None
 
     @property
     def title(self) -> str | None:
         """获取标题"""
         if self.type == "MAJOR_TYPE_ARCHIVE" and self.archive:
             return self.archive.title
+        if self.type == "MAJOR_TYPE_LIVE" and self.live:
+            return self.live.get("title")
         return None
 
     @property
     def text(self) -> str | None:
-        """获取文本内容"""
+        """获取文本内容（仅从 major 字段提取，用于 content 为空时的回退）"""
+        if self.type == "MAJOR_TYPE_OPUS" and self.opus:
+            return self.opus.summary.text
         if self.type == "MAJOR_TYPE_ARCHIVE" and self.archive:
             return self.archive.desc
-        elif self.type == "MAJOR_TYPE_OPUS" and self.opus:
-            return self.opus.summary.text
+        if self.type == "MAJOR_TYPE_LIVE" and self.live:
+            return self.live.get("title", "")
         return None
 
     @property
@@ -90,6 +96,9 @@ class DynamicMajor(Struct):
             return [pic.url for pic in self.opus.pics]
         elif self.type == "MAJOR_TYPE_ARCHIVE" and self.archive and self.archive.cover:
             return [self.archive.cover]
+        elif self.type == "MAJOR_TYPE_LIVE" and self.live:
+            cover = self.live.get("cover")
+            return [cover] if cover else []
         return []
 
     @property
@@ -97,6 +106,8 @@ class DynamicMajor(Struct):
         """获取封面URL"""
         if self.type == "MAJOR_TYPE_ARCHIVE" and self.archive:
             return self.archive.cover
+        if self.type == "MAJOR_TYPE_LIVE" and self.live:
+            return self.live.get("cover")
         return None
 
 
@@ -127,6 +138,13 @@ class DynamicModule(Struct):
         """获取主要内容信息"""
         if self.module_dynamic:
             return self.module_dynamic.get("major")
+        return None
+
+    @property
+    def content_(self) -> str | None:
+        """获取纯文本动态的正文内容（不在 major 字段中）"""
+        if self.module_dynamic:
+            return self.module_dynamic.get("content")
         return None
 
 
@@ -165,11 +183,33 @@ class DynamicInfo(Struct):
 
     @property
     def text(self) -> str | None:
-        """获取文本内容"""
+        """获取文本内容（多重回退）"""
+        # 1. module_dynamic.content（纯文本动态）
+        content = self.modules.content_
+        if content:
+            return content
+        # 2. major.opus.summary.text（图文动态）
         major_info = self.modules.major_info
         if major_info:
-            major = convert(major_info, DynamicMajor)
-            return major.text
+            try:
+                major = convert(major_info, DynamicMajor)
+                if major.text:
+                    return major.text
+            except Exception:
+                pass
+        # 3. module_dynamic.desc.text（部分动态类型）
+        if self.modules.module_dynamic:
+            desc = self.modules.module_dynamic.get("desc")
+            if isinstance(desc, dict) and desc.get("text"):
+                return desc["text"]
+            # 4. module_dynamic.description（另一种格式）
+            desc2 = self.modules.module_dynamic.get("description")
+            if isinstance(desc2, str) and desc2:
+                return desc2
+            # 5. module_dynamic.dynamic（转发动态的原始文本）
+            dynamic_text = self.modules.module_dynamic.get("dynamic")
+            if isinstance(dynamic_text, str) and dynamic_text:
+                return dynamic_text
         return None
 
     @property
@@ -195,3 +235,4 @@ class DynamicData(Struct):
     """动态项目"""
 
     item: DynamicInfo
+    orig: DynamicInfo | None = None

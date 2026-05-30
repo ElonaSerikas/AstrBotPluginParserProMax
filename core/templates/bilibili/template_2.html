@@ -115,8 +115,8 @@
 
             .avatar-box {
                 position: relative;
-                width: 54px;
-                height: 54px;
+                width: 80px;
+                height: 80px;
                 margin-right: 14px;
                 flex-shrink: 0;
             }
@@ -198,6 +198,100 @@
                 font-weight: 700;
                 width: fit-content;
                 margin-top: 2px;
+                line-height: 1.5;
+            }
+
+            .signature-line {
+                font-size: 12px;
+                color: #949ba0;
+                margin-top: 2px;
+                line-height: 1.4;
+                max-width: 400px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .follower-line {
+                font-size: 12px;
+                color: #949ba0;
+                margin-top: 2px;
+                line-height: 1.4;
+            }
+
+            .timestamp-line {
+                font-size: 12px;
+                color: #949ba0;
+                margin-top: 2px;
+                line-height: 1.4;
+            }
+
+            .stats-bar {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                padding: 10px 24px;
+                background: #fafafa;
+                border-top: 1px solid rgba(0, 0, 0, 0.04);
+                border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+            }
+
+            .stat-item {
+                display: flex;
+                align-items: baseline;
+                gap: 4px;
+            }
+
+            .stat-value {
+                font-size: 14px;
+                font-weight: 700;
+                color: #222;
+            }
+
+            .stat-label {
+                font-size: 12px;
+                color: #949ba0;
+            }
+
+            .comments-section {
+                padding: 12px 24px;
+                background: #fafafa;
+                border-top: 1px solid rgba(0, 0, 0, 0.04);
+            }
+
+            .comment-item {
+                padding: 8px 12px;
+                background: #fff;
+                border-radius: 8px;
+                margin-bottom: 8px;
+                border: 1px solid rgba(0, 0, 0, 0.04);
+            }
+
+            .comment-item:last-child {
+                margin-bottom: 0;
+            }
+
+            .comment-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 4px;
+            }
+
+            .comment-author {
+                font-size: 13px;
+                font-weight: 700;
+                color: var(--b-pink);
+            }
+
+            .comment-likes {
+                font-size: 12px;
+                color: #949ba0;
+            }
+
+            .comment-content {
+                font-size: 13px;
+                color: #444;
                 line-height: 1.5;
             }
 
@@ -383,22 +477,68 @@
                             </div>
 
                             <div class="badge-line">
-                                <span class="sub-badge">订阅更新</span>
+                                <span class="sub-badge">{{ platform_display | default('哔哩哔哩') }}</span>
+                                {% if handle %}
+                                <span class="uid-tag" style="margin-left: 6px;">{{ handle }}</span>
+                                {% endif %}
+                                {% if bvid %}
+                                <span class="uid-tag" style="margin-left: 6px; background: rgba(0, 138, 197, 0.1); color: #008ac5; border-color: rgba(0, 138, 197, 0.3);">{{ bvid }}</span>
+                                {% endif %}
                             </div>
+
+                            {% if signature %}
+                            <div class="signature-line">{{ signature }}</div>
+                            {% endif %}
+
+                            {% if follower_count or stats.following or stats.user_likes or stats.total_views %}
+                            <div class="follower-line">
+                                {% if follower_count %}{{ follower_count }} 粉丝{% endif %}
+                                {% if stats.following %} · {{ stats.following }} 关注{% endif %}
+                                {% if stats.user_likes %} · {{ stats.user_likes }} 获赞{% endif %}
+                                {% if stats.total_views %} · {{ stats.total_views }} 播放{% endif %}
+                            </div>
+                            {% endif %}
+
+                            {% if stats and stats.official_title %}
+                            <div class="follower-line" style="color: #fb7299; font-weight: 600;">哔哩哔哩up主认证: {{ stats.official_title }}</div>
+                            {% endif %}
+
+                            {% if stats and stats.video_badge %}
+                            <div class="follower-line" style="color: #008ac5; font-weight: 600;">{{ stats.video_badge }}</div>
+                            {% endif %}
+
+                            {% if timestamp %}
+                            <div class="timestamp-line">{{ timestamp }}</div>
+                            {% endif %}
 
                             {% if title %}
                             <div class="title-line">{{ title }}</div>
                             {% endif %}
                         </div>
                     </div>
-
-                    {% if qrcode %}
-                    <div class="header-qr-box">
-                        <img src="{{ qrcode }}" class="qr-img" />
-                    </div>
-                    {% endif %}
                 </div>
             </div>
+
+            {% if stats %}
+            <div class="stats-bar">
+                {% if stats.views %}<div class="stat-item"><span class="stat-value">{{ stats.views }}</span><span class="stat-label">播放</span></div>{% endif %}
+                {% if stats.danmaku %}<div class="stat-item"><span class="stat-value">{{ stats.danmaku }}</span><span class="stat-label">弹幕</span></div>{% endif %}
+                {% if stats.likes %}<div class="stat-item"><span class="stat-value">{{ stats.likes }}</span><span class="stat-label">点赞</span></div>{% endif %}
+                {% if stats.coins %}<div class="stat-item"><span class="stat-value">{{ stats.coins }}</span><span class="stat-label">投币</span></div>{% endif %}
+                {% if stats.favorites %}<div class="stat-item"><span class="stat-value">{{ stats.favorites }}</span><span class="stat-label">收藏</span></div>{% endif %}
+                {% if stats.comments %}<div class="stat-item"><span class="stat-value">{{ stats.comments }}</span><span class="stat-label">评论</span></div>{% endif %}
+                {% if stats.reposts %}<div class="stat-item"><span class="stat-value">{{ stats.reposts }}</span><span class="stat-label">转发</span></div>{% endif %}
+                {% if stats.fansclub %}<div class="stat-item"><span class="stat-value">{{ stats.fansclub }}</span><span class="stat-label">粉丝团</span></div>{% endif %}
+                {% if stats.high_energy_users %}<div class="stat-item"><span class="stat-value">{{ stats.high_energy_users }}</span><span class="stat-label">高能用户</span></div>{% endif %}
+                {% if stats.fleet_total %}<div class="stat-item"><span class="stat-value">{{ stats.fleet_total }}</span><span class="stat-label">大航海</span></div>{% endif %}
+                {% if stats.governor %}<div class="stat-item"><span class="stat-value">{{ stats.governor }}</span><span class="stat-label">总督</span></div>{% endif %}
+                {% if stats.admiral %}<div class="stat-item"><span class="stat-value">{{ stats.admiral }}</span><span class="stat-label">提督</span></div>{% endif %}
+                {% if stats.captain %}<div class="stat-item"><span class="stat-value">{{ stats.captain }}</span><span class="stat-label">舰长</span></div>{% endif %}
+                {% if stats.is_living %}<div class="stat-item"><span class="stat-value">{{ stats.is_living }}</span><span class="stat-label"></span></div>{% endif %}
+                {% if stats.live_level %}<div class="stat-item"><span class="stat-value">Lv.{{ stats.live_level }}</span><span class="stat-label">直播等级</span></div>{% endif %}
+                {% if stats.top3_rank %}<div class="stat-item"><span class="stat-value">{{ stats.top3_rank }}</span><span class="stat-label">高能榜</span></div>{% endif %}
+            </div>
+            {% endif %}
 
             <div class="content">
                 <div class="text-body">
@@ -450,9 +590,32 @@
                 {% endif %}
             </div>
 
+            {% if pinned_comment or hot_comment %}
+            <div class="comments-section">
+                {% if pinned_comment %}
+                <div class="comment-item">
+                    <div class="comment-header">
+                        <span class="comment-author">📌 {{ pinned_comment.author }}</span>
+                        {% if pinned_comment.likes %}<span class="comment-likes">{{ pinned_comment.likes }} 赞</span>{% endif %}
+                    </div>
+                    <div class="comment-content">{{ pinned_comment.content }}</div>
+                </div>
+                {% endif %}
+                {% if hot_comment %}
+                <div class="comment-item">
+                    <div class="comment-header">
+                        <span class="comment-author">🔥 {{ hot_comment.author }}</span>
+                        {% if hot_comment.likes %}<span class="comment-likes">{{ hot_comment.likes }} 赞</span>{% endif %}
+                    </div>
+                    <div class="comment-content">{{ hot_comment.content }}</div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
             <div class="footer">
                 <div class="copyright-pill">
-                    Created By AstrBot Plugin Bilibili
+                    {{ bot_name | default('AstrBot') }}解析 · {{ platform_display | default('哔哩哔哩') }}
                 </div>
             </div>
         </div>

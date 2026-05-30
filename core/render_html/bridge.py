@@ -86,6 +86,7 @@ def parse_result_to_render_payload(
     result: ParseResult,
     card_width: str = "1440px",
     banner_base64: str = "",
+    bot_name: str = "AstrBot",
 ) -> RenderPayload:
     """Convert ParseResult to RenderPayload for HTML rendering."""
     card_width = _ensure_px(card_width)
@@ -116,6 +117,7 @@ def parse_result_to_render_payload(
         ),
         banner=banner_base64,
         platform_color=platform_color,
+        bot_name=bot_name,
         card_width=card_width,
         font_scale=font_scale,
     )
@@ -169,19 +171,19 @@ def parse_result_to_render_payload(
                 payload.image_urls.append(cont.cover)
             # Task[Path] / Path — 本地路径不能用于 HTML 渲染，跳过
 
-    # 统计数据
+    # 统计数据（透传所有 key，模板按需渲染）
     if result.stats:
         payload.stats = {
-            "views": _fmt_stat(result.stats.get("views")),
-            "danmaku": _fmt_stat(result.stats.get("danmaku")),
-            "likes": _fmt_stat(result.stats.get("likes")),
-            "favorites": _fmt_stat(result.stats.get("favorites")),
-            "coins": _fmt_stat(result.stats.get("coins")),
-            "comments": _fmt_stat(result.stats.get("comments")),
-            "reposts": _fmt_stat(result.stats.get("reposts")),
-            "quotes": _fmt_stat(result.stats.get("quotes")),
-            "bookmarks": _fmt_stat(result.stats.get("bookmarks")),
+            k: _fmt_stat(v) for k, v in result.stats.items() if v
         }
+    # 将 extra 中的特殊字段传入 stats（模板通过 stats.xxx 渲染）
+    if result.extra:
+        for key in ("official_title", "video_badge"):
+            val = result.extra.get(key)
+            if val:
+                if not payload.stats:
+                    payload.stats = {}
+                payload.stats[key] = val
 
     # 生成二维码
     if result.url:
@@ -253,6 +255,11 @@ def _result_to_forward(result: ParseResult) -> ForwardPayload:
             _fwd_avatar = result.author.avatar
         elif isinstance(result.author.avatar, Path):
             _fwd_avatar = str(result.author.avatar)
+    # 转发统计数据
+    fwd_stats = {}
+    if result.stats:
+        fwd_stats = {k: _fmt_stat(v) for k, v in result.stats.items() if v}
+
     return ForwardPayload(
         name=result.author.name if result.author else "",
         avatar=_fwd_avatar,
@@ -262,6 +269,10 @@ def _result_to_forward(result: ParseResult) -> ForwardPayload:
         title=result.title or "",
         type=result.platform.name,
         platform_display=result.platform.display_name or result.platform.name,
+        signature=result.author.description if result.author else "",
+        follower_count=str(result.author.follower_count) if result.author and result.author.follower_count else "",
+        timestamp=datetime.fromtimestamp(result.timestamp).strftime("%Y-%m-%d %H:%M:%S") if result.timestamp else "",
+        stats=fwd_stats,
     )
 
 
